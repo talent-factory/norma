@@ -1,0 +1,14 @@
+# Rust build artifacts
+/target
+
+# Local tool caches / agent state — not meant to be shared
+/.claude/
+/.headroom/
+/.serena/
+
+# SQLite runtime databases (created on first run, not source)
+*.db
+*.db-journal
+
+# OS cruft
+.DS_Store

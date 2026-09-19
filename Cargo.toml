@@ -1,0 +1,50 @@
+[package]
+name = "norma"
+version = "0.1.0"
+edition = "2021"
+authors = ["Talent Factory GmbH <daniel@talentfactory.ch>"]
+description = "Developer-grade code pattern enforcement everywhere you code"
+repository = "https://github.com/talent-factory/norma"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# MCP Server Framework
+mcpkit = "0.1"
+tokio = { version = "1.40", features = ["full"] }
+
+# AST Parsing & Pattern Matching
+ast-grep-core = "0.26"
+tree-sitter = "0.20"
+
+# Data Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio", "chrono"] }
+sqlx-sqlite = "0.7"
+
+# Error Handling & Logging
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+regex = "1.10"
+
+[dev-dependencies]
+tempfile = "3.8"
+tokio-test = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[[bin]]
+name = "norma"
+path = "src/main.rs"
