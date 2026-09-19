@@ -14,7 +14,7 @@ Eine Architektur-Spezifikation für norma (Rust MCP Server zur Design-Pattern-Va
 
 ## Decisions so far
 
-_(noch keine geschlossenen Tickets)_
+- [mcpkit vs. Alternative (research)](issues/01-mcpkit-vs-alternative.md) — Wechsel zu `rmcp` (offizielles MCP-Rust-SDK); `mcpkit` bleibt wegen geringer Reife/Aktivität und struktureller Facade-Crate-Probleme (Build-Fehler nicht trivial fixbar) nicht das Fundament.
 
 ## Not yet specified
 
