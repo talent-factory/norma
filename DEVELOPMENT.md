@@ -28,45 +28,6 @@ This document outlines the current state of the norma project and the next steps
    - Benchmark pattern matching, cache compiled ast-grep rules, tune the SQLite connection pool.
    - Location: `src/pattern_engine.rs`, `src/pattern_store.rs`
 
-## 🎯 Quick Tasks for Claude Code
-
-### Immediate (Session 1-2)
-
-- [ ] Build and test the project
-  ```bash
-  cargo build
-  cargo test
-  ```
-
-- [ ] Implement AST-grep integration in `pattern_engine.rs`
-  - Use `ast-grep-core` crate for real pattern matching
-  - Test with a Java factory pattern example
-
-- [ ] Add more default patterns
-  - Singleton pattern (Java)
-  - Observer pattern (TypeScript)
-  - Strategy pattern (Python)
-
-### Short-term (Session 3-4)
-
-- [ ] Implement CLI for validation
-  - `norma validate --file src/Main.java --lang java`
-  - `norma check-patterns`
-
-- [ ] Add pre-commit hook support
-  - Generate `.pre-commit-config.yaml`
-  - Test integration with real Git repo
-
-- [ ] Improve error messages
-  - Better violation descriptions
-  - Actionable suggestions
-
-### Medium-term (Week 2+)
-
-- [ ] Build web UI for pattern management (optional)
-- [ ] Create pattern marketplace (optional)
-- [ ] Publish crate to crates.io (optional)
-
 ## 🛠️ Development Environment
 
 ### Prerequisites
@@ -101,26 +62,30 @@ cargo build --release
 
 ## 📝 Pattern Definition Examples
 
-### Java Singleton
+See `src/default_patterns.rs` for the four patterns norma ships with (one
+per MVP language, all expressing "no debug print"), and the README's
+[Pattern Definition Format](README.md#pattern-definition-format) section
+for the shape a `rule` YAML document needs. There is no `Pattern::new`
+constructor -- `Pattern::from_rule` (`src/pattern_engine.rs`) is the only
+way to build one, and it derives `id`/`language`/`severity` from the YAML
+rather than accepting them separately (see docs/adr/0002.md).
 
-```rust
-Pattern::new(
-    "java-singleton".to_string(),
-    "Enforce proper Singleton pattern implementation".to_string(),
-    r"class\s+\w+\s*\{[^}]*private\s+static\s+\w+\s+instance[^}]*public\s+static\s+synchronized".to_string(),
-    vec!["java".to_string()],
-)
-```
+A v2 GoF pattern (see "Next Steps" above) would look like this for Java
+Singleton -- a `kind`/`has` rule rather than a plain string pattern, since
+it needs to express a structural relationship (a private static field
+*inside* the class), not just a code shape:
 
-### TypeScript Factory
-
-```rust
-Pattern::new(
-    "ts-factory-pattern".to_string(),
-    "Use Factory pattern for object creation".to_string(),
-    r"new\s+\w+\(".to_string(),  // Simplified; improve with AST
-    vec!["typescript".to_string(), "javascript".to_string()],
-)
+```yaml
+id: java-singleton
+message: Enforce proper Singleton pattern implementation
+severity: warning
+language: Java
+rule:
+  kind: class_declaration
+  has:
+    kind: field_declaration
+    # ... the actual field/method shape is still to be worked out
+    # against real ast-grep-core, the same way the v1 defaults were.
 ```
 
 ## 🔍 Testing Checklist
@@ -159,5 +124,5 @@ When working in Claude Code, reference:
 
 ---
 
-**Last updated:** 2025-09-19
+**Last updated:** 2026-09-20
 **Maintainer:** Talent Factory GmbH

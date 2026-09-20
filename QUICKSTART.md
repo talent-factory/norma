@@ -6,7 +6,7 @@ Get **norma** running in 5 minutes. For the full reference see
 
 ## 1. Prerequisites
 
-- Rust (see `rust-toolchain.toml` for the pinned version) — [install rustup](https://rustup.rs/)
+- Rust stable (see `rust-toolchain.toml`) — [install rustup](https://rustup.rs/)
 - Git
 
 SQLite is bundled with norma, so there is nothing to install for it.
@@ -52,8 +52,12 @@ environment variable.
 ## 5. Validate a file
 
 ```bash
-norma validate --language rust src/main.rs
+norma validate --language rust src/models.rs
 ```
+
+(`src/main.rs` is a bad first example here: its whole job is printing to
+stdout, so it trips the "no debug print" pattern -- see
+`tests/dogfooding.rs`'s comment on excluding it from norma's self-check.)
 
 `validate` takes one or more files as positional arguments, so globs work
 too. Add `--json` for machine-readable output (a JSON array with one
