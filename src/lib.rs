@@ -8,3 +8,4 @@
 //! addition should keep `cargo test --lib` green.
 
 pub mod models;
+pub mod pattern_engine;
