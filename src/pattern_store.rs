@@ -156,24 +156,36 @@ impl PatternStore {
         rows.iter().map(row_to_pattern).collect()
     }
 
-    /// Registers norma's default pattern set the first time the store is
-    /// empty. Safe to call on every startup.
-    ///
-    /// Note: only seeds when the store is *completely* empty -- see
-    /// `DEVELOPMENT.md`'s "Upgrading from the MVP pattern set" section for
-    /// the upgrade gap this creates for pre-existing databases.
+    /// Registers every default pattern whose id isn't already a row in the
+    /// store. Safe to call on every startup -- this is how an existing
+    /// installation picks up default patterns added by a newer norma
+    /// version (e.g. the GoF v2 set added after the MVP shipped), without
+    /// ever touching a row that already exists. That's a deliberate,
+    /// narrow guarantee: a pre-existing row is left completely alone even
+    /// if the shipped `rule` for that id has since changed, so a user's
+    /// own edits (or just an MVP-era row) can never be silently reset.
     pub async fn seed_defaults(&self) -> Result<()> {
-        if !self.list_all_patterns().await?.is_empty() {
-            return Ok(());
-        }
+        let existing_ids: std::collections::HashSet<String> = self
+            .list_all_patterns()
+            .await?
+            .into_iter()
+            .map(|p| p.id().to_string())
+            .collect();
         for def in crate::default_patterns::ALL {
-            self.register_pattern(
+            let now = Utc::now();
+            let pattern = Pattern::from_rule(
                 def.name.to_string(),
                 def.description.to_string(),
                 Some(def.category.to_string()),
                 def.rule.to_string(),
-            )
-            .await?;
+                true,
+                now,
+                now,
+            )?;
+            if existing_ids.contains(pattern.id()) {
+                continue;
+            }
+            self.save_pattern(pattern).await?;
         }
         Ok(())
     }
@@ -348,5 +360,38 @@ rule:
         // Calling it again must not duplicate or error.
         store.seed_defaults().await.unwrap();
         assert_eq!(store.list_all_patterns().await.unwrap().len(), 20);
+    }
+
+    #[tokio::test]
+    async fn seed_defaults_adds_missing_patterns_without_touching_an_existing_one() {
+        let store = test_store().await;
+        // Simulate a pre-existing (e.g. MVP-era, or user-customized) row
+        // under one of the shipped default patterns' ids.
+        store
+            .register_pattern(
+                "My Custom Name".to_string(),
+                "custom description".to_string(),
+                Some("custom-category".to_string()),
+                RUST_RULE.to_string(), // id: no-debug-print-rust
+            )
+            .await
+            .unwrap();
+
+        store.seed_defaults().await.unwrap();
+
+        let all = store.list_all_patterns().await.unwrap();
+        assert_eq!(
+            all.len(),
+            20,
+            "the other 19 defaults must still be added on top of the pre-existing row"
+        );
+        let customized = all
+            .iter()
+            .find(|p| p.id() == "no-debug-print-rust")
+            .expect("the pre-existing row must still be there");
+        assert_eq!(
+            customized.name, "My Custom Name",
+            "seed_defaults must never overwrite a row that already exists"
+        );
     }
 }
