@@ -242,6 +242,89 @@ rule:
     }
 "#,
     },
+    DefaultPattern {
+        name: "Observer Presence",
+        description: "Class has a Listener collection and a notify-style method -- an Observer-shaped construct.",
+        category: "behavioral",
+        rule: r#"
+id: observer-presence-java
+message: Class has a Listener collection and a notify-style method -- an Observer-shaped construct
+severity: info
+language: Java
+rule:
+  kind: class_declaration
+  all:
+    - has:
+        stopBy: end
+        kind: field_declaration
+        regex: Listener
+    - has:
+        stopBy: end
+        kind: method_declaration
+        regex: notify
+"#,
+    },
+    DefaultPattern {
+        name: "Observer Presence",
+        description: "Class has an observers collection and a notify-style method -- an Observer-shaped construct.",
+        category: "behavioral",
+        rule: r#"
+id: observer-presence-python
+message: Class has an observers collection and a notify-style method -- an Observer-shaped construct
+severity: info
+language: Python
+rule:
+  kind: class_definition
+  all:
+    - has:
+        stopBy: end
+        kind: assignment
+        regex: observers
+    - has:
+        stopBy: end
+        kind: function_definition
+        regex: notify
+"#,
+    },
+    DefaultPattern {
+        name: "Observer Presence",
+        description: "Struct has an observers-style field -- an Observer-shaped construct.",
+        category: "behavioral",
+        rule: r#"
+id: observer-presence-rust
+message: Struct has an observers-style field -- an Observer-shaped construct
+severity: info
+language: Rust
+rule:
+  kind: struct_item
+  has:
+    stopBy: end
+    kind: field_declaration
+    regex: observers
+"#,
+    },
+    DefaultPattern {
+        name: "Observer Presence",
+        description: "Class has an observers collection and a notify-style method -- an Observer-shaped construct.",
+        category: "behavioral",
+        rule: r#"
+id: observer-presence-typescript
+message: Class has an observers collection and a notify-style method -- an Observer-shaped construct
+severity: info
+language: TypeScript
+rule:
+  kind: class_declaration
+  all:
+    - has:
+        stopBy: end
+        kind: public_field_definition
+        regex: observers
+    - has:
+        stopBy: end
+        kind: method_definition
+        regex: notify
+"#,
+    },
 ];
 
 #[cfg(test)]

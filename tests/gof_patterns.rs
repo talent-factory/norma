@@ -163,3 +163,72 @@ fn factory_overuse_typescript() {
         "function make(kind: string) { if (kind === 'a') { new Dog(); } }",
     );
 }
+
+#[test]
+fn observer_presence_java() {
+    assert_matches(
+        "observer-presence-java",
+        "java",
+        "class Publisher { private List<Listener> listeners; void notifyAll_() { for (Listener l : listeners) { l.update(); } } }",
+    );
+    assert_does_not_match(
+        "observer-presence-java",
+        "java",
+        "class Config { private int value; int get() { return value; } }",
+    );
+}
+
+#[test]
+fn observer_presence_python() {
+    assert_matches(
+        "observer-presence-python",
+        "python",
+        "class Publisher:\n    def __init__(self):\n        self._observers = []\n    def notify_all(self):\n        for o in self._observers:\n            o.update()\n",
+    );
+    assert_does_not_match(
+        "observer-presence-python",
+        "python",
+        "class Config:\n    def __init__(self):\n        self.value = 1\n    def get(self):\n        return self.value\n",
+    );
+}
+
+#[test]
+fn observer_presence_rust() {
+    assert_matches(
+        "observer-presence-rust",
+        "rust",
+        "struct Publisher { observers: Vec<Box<dyn Observer>> }",
+    );
+    assert_does_not_match("observer-presence-rust", "rust", "struct Config { value: i32 }");
+}
+
+#[test]
+fn observer_presence_typescript() {
+    assert_matches(
+        "observer-presence-typescript",
+        "typescript",
+        "class Publisher { observers: Observer[] = []; notifyAll() { this.observers.forEach(o => o.update()); } }",
+    );
+    assert_does_not_match(
+        "observer-presence-typescript",
+        "typescript",
+        "class Config { value: number = 1; get() { return this.value; } }",
+    );
+}
+
+/// The one place these tests check severity explicitly: Observer is the
+/// only `info`-severity default pattern (see
+/// docs/superpowers/specs/2026-09-20-gof-pattern-set-v2-design.md), so a
+/// match must be visible but must not fail the run -- `pattern_engine.rs`
+/// already unit-tests the general rule (Task 1); this confirms the real
+/// shipped default pattern behaves the same way, not just a synthetic
+/// fixture.
+#[test]
+fn observer_presence_matches_do_not_fail_validation() {
+    let pattern = default_pattern("observer-presence-rust");
+    let source = "struct Publisher { observers: Vec<Box<dyn Observer>> }";
+    let result = validate(source, "rust", std::slice::from_ref(&pattern)).unwrap();
+    assert_eq!(result.violations.len(), 1);
+    assert!(result.passed);
+    assert_eq!(result.score, 1.0);
+}
