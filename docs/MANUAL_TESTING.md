@@ -31,8 +31,13 @@ cargo test
 ```
 
 Expected: every test in `src/` (unit tests per module) and `tests/`
-(`dogfooding.rs`, plus `gof_patterns.rs` once the GoF v2 plan is
-implemented) passes, `0 failed`.
+(`dogfooding.rs`, `gof_patterns.rs`) passes, `0 failed`.
+
+(All of this document's steps also have a `just` shortcut for the
+everyday case -- run `just` to list them. They use your real
+`$HOME/.local/share/norma/norma.db`, not a scratch database, so they're
+for quick day-to-day checks rather than the isolated, repeatable
+verification this document is for.)
 
 ## 2. Build the binary
 
@@ -51,8 +56,8 @@ you want to measure real startup time.
 cargo run -- --db /tmp/norma-manual-test.db list-patterns
 ```
 
-Expected: one line per registered pattern (4 MVP patterns on a fresh
-database, or 20 once GoF v2 is implemented), each shaped like:
+Expected: one line per registered pattern (20 total: 4 MVP "no debug
+print" patterns plus 16 GoF patterns), each shaped like:
 
 ```
 no-debug-print-java          java       [warning] No Debug Print
@@ -217,6 +222,37 @@ Expected: `norma_has_no_debug_prints_in_its_own_source ... ok`. If this
 ever fails, it means a real `println!` crept into `src/` (excluding
 `main.rs`, whose `println!` calls are the CLI's intended stdout output) --
 fix the source, don't weaken the test.
+
+## 14. Per-id seeding: an upgraded database picks up new patterns without losing customizations
+
+`PatternStore::seed_defaults` inserts every default pattern whose id
+isn't already a row -- it never touches a row that already exists. This
+simulates an old (or user-edited) database and confirms both halves of
+that guarantee:
+
+```bash
+rm -f /tmp/norma-upgrade-test.db
+
+# Seed a fresh database, then strip it down to one row and rename it --
+# standing in for an old install or a user's own edit.
+cargo run -- --db /tmp/norma-upgrade-test.db list-patterns >/dev/null
+sqlite3 /tmp/norma-upgrade-test.db "DELETE FROM patterns WHERE id != 'no-debug-print-rust';"
+sqlite3 /tmp/norma-upgrade-test.db "UPDATE patterns SET name = 'My Custom Name' WHERE id = 'no-debug-print-rust';"
+
+# Re-run norma -- seed_defaults must fill in the other 19 patterns...
+cargo run -- --db /tmp/norma-upgrade-test.db list-patterns | wc -l
+
+# ...while leaving the customized row completely untouched.
+sqlite3 /tmp/norma-upgrade-test.db "SELECT name FROM patterns WHERE id = 'no-debug-print-rust';"
+```
+
+Expected: `20` from the `list-patterns | wc -l` line, and `My Custom
+Name` from the final `sqlite3` query -- not the shipped default's real
+name ("No Debug Print").
+
+```bash
+rm -f /tmp/norma-upgrade-test.db
+```
 
 ## Cleanup
 
