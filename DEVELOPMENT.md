@@ -14,7 +14,19 @@ This document outlines the current state of the norma project and the next steps
 - [x] Dogfooding integration test: the Rust "no debug print" default pattern run against norma's own `src/`, skipping `main.rs` (its `println!` calls are legitimate CLI output, not a debug leftover) -- `tests/dogfooding.rs`
 - [x] Pre-commit hook template (`.pre-commit-config.yaml`), `language: system` so pre-commit calls the already-installed `norma` binary instead of compiling Rust on every run
 - [x] README and DEVELOPMENT docs brought in line with the above
-- [x] Four GoF default patterns (Singleton, Factory, Observer, Strategy), one per MVP language (16 patterns total, 20 with the MVP set) -- `singleton-quality-*`/`factory-overuse-*` under category `creational`, `observer-presence-*`/`strategy-overuse-*` under category `behavioral`; `observer-presence-*` is `info`-severity and (per `pattern_engine::validate`'s severity-aware scoring) visible without failing a run -- `src/default_patterns.rs`, `docs/superpowers/specs/2026-09-20-gof-pattern-set-v2-design.md`
+- [x] Four GoF default patterns (Singleton, Factory, Observer, Strategy), one per MVP language (16 new GoF patterns, 20 default patterns in total) -- `singleton-quality-*`/`factory-overuse-*` under category `creational`, `observer-presence-*`/`strategy-overuse-*` under category `behavioral`; `observer-presence-*` is `info`-severity and (per `pattern_engine::validate`'s severity-aware scoring) visible without failing a run -- `src/default_patterns.rs`, `docs/superpowers/specs/2026-09-20-gof-pattern-set-v2-design.md`
+
+### ⚠️ Upgrading from the MVP pattern set
+
+Existing installations with a pre-existing `norma.db` will **not**
+automatically receive the 16 new GoF patterns: `PatternStore::seed_defaults`
+(`src/pattern_store.rs`) only seeds the default pattern set when the store
+is completely empty, so a database created under the MVP (four
+"no debug print" patterns only) is left as-is on upgrade, silently, with
+no warning. To pick up the new patterns, delete the existing database
+(default location `$HOME/.local/share/norma/norma.db`) or point `--db`/
+`$NORMA_DB` at a fresh path, then re-run norma -- it will reseed all 20
+default patterns.
 
 ### 🔄 Next Steps
 
@@ -24,6 +36,15 @@ This document outlines the current state of the norma project and the next steps
 2. **Performance optimization** (Priority: Low)
    - Benchmark pattern matching, cache compiled ast-grep rules, tune the SQLite connection pool.
    - Location: `src/pattern_engine.rs`, `src/pattern_store.rs`
+
+3. **Per-id pattern seeding** (Priority: Medium)
+   - `seed_defaults` currently gates on "store is completely empty" (see
+     "⚠️ Upgrading from the MVP pattern set" above), so an existing
+     installation never receives newly added default patterns. Instead, it
+     should insert each `DefaultPattern` whose parsed `id` isn't already a
+     row, so future default-pattern additions reach existing installations
+     automatically without resetting user customizations.
+   - Location: `src/pattern_store.rs`'s `seed_defaults`.
 
 ## 🛠️ Development Environment
 
