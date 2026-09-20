@@ -8,7 +8,8 @@
 ## 🎯 Features
 
 - ✅ **Pattern Validation** — Check code against registered design patterns
-- ✅ **Multi-Language Support** — Java, TypeScript, Python, Go, and more
+- ✅ **Multi-Language Support** — Java, Python, Rust and TypeScript (an
+  unsupported `--language` is rejected, never silently skipped)
 - ✅ **MCP Integration** — Works with Claude Code, Cursor, and other MCP clients
 - ✅ **Persistent Storage** — SQLite-backed pattern registry
 - ✅ **Real-Time Feedback** — Instant violation detection with suggestions
@@ -30,17 +31,33 @@ Run the MCP tool server (for Claude Code / MCP Inspector):
 norma serve
 ```
 
-Validate a file from the command line:
+Validate one or more files from the command line (files are positional,
+so shell globs and `pre-commit`'s staged-file list both work):
 
 ```bash
-norma validate --file src/main.rs --language rust
-norma validate --file src/main.rs --language rust --json
+norma validate --language rust src/main.rs
+norma validate --language rust --json src/*.rs
 ```
+
+Exit status is non-zero if *any* file has violations.
 
 List every registered pattern:
 
 ```bash
 norma list-patterns
+```
+
+### Where the pattern database lives
+
+norma stores its pattern registry in SQLite at a fixed per-user location
+(`$HOME/.local/share/norma/norma.db`) so the same registry is used no
+matter which directory norma is launched from. Override it per invocation
+with `--db <PATH>` (a global flag, valid on every subcommand) or globally
+with the `NORMA_DB` environment variable:
+
+```bash
+norma --db ./team-patterns.db list-patterns
+NORMA_DB=/srv/norma/patterns.db norma serve
 ```
 
 Enable the pre-commit hook (see `.pre-commit-config.yaml` -- requires
