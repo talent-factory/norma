@@ -73,19 +73,28 @@ rule:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pattern_engine::parse_rule;
+    use crate::pattern_engine::{language_key, parse_rule};
 
     #[test]
-    fn every_default_rule_parses_and_covers_one_mvp_language_each() {
+    fn every_default_rule_parses_and_targets_a_supported_language() {
+        for def in ALL {
+            let config = parse_rule(def.rule).expect("default rule must parse");
+            language_key(config.language)
+                .expect("every default rule must target a language norma supports");
+        }
+    }
+
+    #[test]
+    fn every_mvp_language_has_at_least_one_default_pattern() {
         let mut languages: Vec<&str> = ALL
             .iter()
             .map(|def| {
                 let config = parse_rule(def.rule).expect("default rule must parse");
-                crate::pattern_engine::language_key(config.language)
-                    .expect("every default rule must target a language norma supports")
+                language_key(config.language).unwrap()
             })
             .collect();
         languages.sort();
+        languages.dedup();
         assert_eq!(languages, ["java", "python", "rust", "typescript"]);
     }
 }
