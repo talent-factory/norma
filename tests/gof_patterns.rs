@@ -3,8 +3,11 @@
 //! docs/superpowers/specs/2026-09-20-gof-pattern-set-v2-design.md and
 //! .scratch/norma-architecture/issues/06-gof-pattern-set-v2-scope.md.
 //! Each of the 16 default rules (4 patterns x 4 languages) gets one
-//! positive and one negative case, using the exact source snippets
-//! already verified against ast-grep-core while writing that ticket.
+//! positive and one negative case, using source snippets equivalent to
+//! the ones verified against ast-grep-core while writing that ticket
+//! (Ticket 06 documents the verified rule YAMLs and that 32/32 probes
+//! were green, but doesn't preserve the literal probe source strings for
+//! audit).
 
 use norma::default_patterns;
 use norma::models::Pattern;
@@ -64,6 +67,11 @@ fn singleton_quality_java() {
         "java",
         "class Config { private static Config instance; private Config() {} }",
     );
+    assert_matches(
+        "singleton-quality-java",
+        "java",
+        "class Config { private static Config instance; static Config get() { return instance; } }",
+    );
 }
 
 #[test]
@@ -92,6 +100,16 @@ fn singleton_quality_rust() {
         "rust",
         "static INSTANCE: OnceLock<Config> = OnceLock::new();\nstruct Config;\nimpl Config { fn new() -> Config { Config } }",
     );
+    assert_does_not_match(
+        "singleton-quality-rust",
+        "rust",
+        "static INSTANCE: u32 = 1;\nstruct Totally;\nstruct Unrelated;\nimpl Unrelated { pub fn new() -> Unrelated { Unrelated } }",
+    );
+    assert_does_not_match(
+        "singleton-quality-rust",
+        "rust",
+        "struct Config;\nimpl Config { pub fn new() -> Config { Config } }",
+    );
 }
 
 #[test]
@@ -105,6 +123,16 @@ fn singleton_quality_typescript() {
         "singleton-quality-typescript",
         "typescript",
         "class Config { private static instance: Config; private constructor() {} }",
+    );
+    assert_matches(
+        "singleton-quality-typescript",
+        "typescript",
+        "class Config { private static instance: Config; constructor(private readonly x: number) {} }",
+    );
+    assert_matches(
+        "singleton-quality-typescript",
+        "typescript",
+        "class Config { private static instance: Config; static get(): Config { return Config.instance; } }",
     );
 }
 
@@ -307,4 +335,19 @@ fn factory_and_strategy_overuse_python_both_match_the_same_type_switch() {
     let source = "def make(kind):\n    if kind == 'a':\n        Dog()\n    elif kind == 'b':\n        Cat()\n";
     assert_matches("factory-overuse-python", "python", source);
     assert_matches("strategy-overuse-python", "python", source);
+}
+
+/// Known limitation (see docs/superpowers/specs/2026-09-20-gof-pattern-set-v2-design.md,
+/// "Known limitations"): `strategy-overuse-java`'s pattern only binds to
+/// unqualified method calls, so a receiver-qualified dispatch -- the more
+/// canonical Strategy-type-switch smell -- is not caught, unlike its
+/// TypeScript/Rust/Python siblings. This test locks in that known,
+/// accepted gap as documented behavior.
+#[test]
+fn strategy_overuse_java_does_not_match_receiver_qualified_calls() {
+    assert_does_not_match(
+        "strategy-overuse-java",
+        "java",
+        "class Payment { void pay(String kind) { if (kind.equals(\"card\")) { card.pay(); } else if (kind.equals(\"cash\")) { cash.pay(); } } }",
+    );
 }

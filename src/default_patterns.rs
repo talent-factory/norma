@@ -1,10 +1,15 @@
-/// norma's default pattern set (see the "MVP-Pattern-Set-Scope" ticket on
-/// the wayfinder map, `.scratch/norma-architecture/issues/05-mvp-pattern-set-scope.md`):
-/// one pattern per MVP language, all expressing the same idea -- "no
-/// debug prints in production code" -- so the same concept is visibly
-/// expressed differently per language, per docs/adr/0002.md. Every rule
-/// below was verified against real `ast-grep-core` while writing that
-/// ticket.
+/// norma's default pattern set: 4 MVP `no-debug-print` patterns (see the
+/// "MVP-Pattern-Set-Scope" ticket on the wayfinder map,
+/// `.scratch/norma-architecture/issues/05-mvp-pattern-set-scope.md`), one
+/// per MVP language, all expressing the same idea -- "no debug prints in
+/// production code" -- so the same concept is visibly expressed
+/// differently per language, per docs/adr/0002.md; plus 16 GoF patterns --
+/// Singleton, Factory, Observer, Strategy, one per MVP language each (see
+/// Ticket 06, `.scratch/norma-architecture/issues/06-gof-pattern-set-v2-scope.md`,
+/// and `docs/superpowers/specs/2026-09-20-gof-pattern-set-v2-design.md`) --
+/// across three categories (`code-quality`, `creational`, `behavioral`).
+/// Every rule below was verified against real `ast-grep-core` while
+/// writing its respective ticket.
 pub struct DefaultPattern {
     pub name: &'static str,
     pub description: &'static str,
@@ -86,13 +91,18 @@ rule:
         pattern:
           context: 'class C { private static $TYPE instance; }'
           selector: field_declaration
-    - has:
-        stopBy: end
-        kind: constructor_declaration
-        not:
-          has:
-            kind: modifiers
-            regex: private
+    - any:
+        - not:
+            has:
+              stopBy: end
+              kind: constructor_declaration
+        - has:
+            stopBy: end
+            kind: constructor_declaration
+            not:
+              has:
+                kind: modifiers
+                regex: private
 "#,
     },
     DefaultPattern {
@@ -126,20 +136,26 @@ rule:
         category: "creational",
         rule: r#"
 id: singleton-quality-rust
-message: A public `new()` next to a module-level `static INSTANCE` defeats the Singleton -- callers can construct extra instances directly
+message: A public `new()` next to a module-level `static INSTANCE` of the same type defeats the Singleton -- callers can construct extra instances directly
 severity: warning
 language: Rust
 rule:
-  kind: source_file
+  kind: impl_item
   all:
     - has:
-        stopBy: end
-        kind: static_item
-        pattern: static INSTANCE $$$REST
+        field: type
+        pattern: $TYPE
     - has:
         stopBy: end
         kind: function_item
-        pattern: pub fn new($$$PARAMS) -> $$$RET { $$$BODY }
+        pattern: pub fn new($$$PARAMS) -> $TYPE { $$$BODY }
+    - inside:
+        stopBy: end
+        kind: source_file
+        has:
+          stopBy: end
+          kind: static_item
+          pattern: 'static INSTANCE: $WRAPPER<$TYPE> = $$$INIT;'
 "#,
     },
     DefaultPattern {
@@ -160,15 +176,24 @@ rule:
         pattern:
           context: 'class C { private static instance: $TYPE; }'
           selector: public_field_definition
-    - has:
-        stopBy: end
-        kind: method_definition
-        pattern:
-          context: 'class C { constructor() {} }'
-          selector: method_definition
-        not:
-          has:
-            regex: private
+    - any:
+        - not:
+            has:
+              stopBy: end
+              kind: method_definition
+              has:
+                kind: property_identifier
+                regex: '^constructor$'
+        - has:
+            stopBy: end
+            kind: method_definition
+            has:
+              kind: property_identifier
+              regex: '^constructor$'
+            not:
+              has:
+                kind: accessibility_modifier
+                regex: '^private$'
 "#,
     },
     DefaultPattern {
