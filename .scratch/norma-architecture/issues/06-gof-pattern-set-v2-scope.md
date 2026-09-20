@@ -288,3 +288,125 @@ rule:
 ```
 
 Das tatsächliche Einpflegen dieser 16 Regeln als `DefaultPattern`-Einträge sowie die `pattern_engine::validate`-Anpassung (Score/`passed` ignorieren `off`/`hint`/`info`) sind Umsetzung und bleiben ausserhalb dieser Karte -- siehe die zugehörige Implementierungs-Spec/-Plan.
+
+## Addendum: Singleton rules revised after PR review
+
+Die drei Singleton-Regeln oben (Rust, Java, TypeScript) sind **historisch** --
+sie zeigen, was zum Zeitpunkt dieser Karte gegen `ast-grep-core` verifiziert
+war. Sowohl der automatisierte `pr-review-toolkit`-Review von PR #2 als auch
+manuelle Nachverifikation deckten danach echte Bugs in genau diesen drei
+Regeln auf:
+
+- **Rust:** `singleton-quality-rust` matchte auf `kind: source_file`-Ebene,
+  ganz ohne Typkorrelation zwischen dem `impl`-Block und der `static
+  INSTANCE` -- zwei völlig unabhängige Typen im selben File (ein `Singleton`
+  mit `pub fn new()` irgendwo und ein `static INSTANCE` eines ganz anderen
+  Typs irgendwo anders) lösten fälschlich einen Treffer aus. Ein erster
+  Fix-Versuch behob das, indem `$TYPE` zwischen `impl`-Block und Static
+  geteilt wurde, überkorrigierte dabei aber und liess die idiomatische Form
+  `pub fn new() -> Self` (unter anderem) nicht mehr matchen.
+- **TypeScript:** Die Konstruktor-Erkennung lief über ein
+  `pattern: { context: 'class C { constructor() {} }', selector:
+  method_definition }`-Fragment -- das matcht nur einen **parameterlosen**
+  Konstruktor und schlägt bei jedem parametrisierten Konstruktor (z. B.
+  `constructor(private readonly x: number) {}`) still fehl, wodurch die
+  Regel den Fall gar nicht erst als Konstruktor erkennt.
+- **Java und TypeScript gemeinsam:** Beide Regeln übersahen den Fall "gar
+  kein expliziter Konstruktor vorhanden" -- eine Klasse ohne jeden
+  Konstruktor ist ebenso wenig ein korrektes Singleton (der implizite
+  Default-Konstruktor ist public), wurde aber nicht erfasst.
+
+Die korrigierten, aktuell ausgelieferten Versionen sind die in
+`src/default_patterns.rs` gepflegten `DefaultPattern`-Einträge -- **das ist
+jetzt die verbindliche Quelle**, nicht mehr die drei Blöcke weiter oben in
+dieser Karte. Zur Referenz, wörtlich aus `src/default_patterns.rs`
+übernommen:
+
+```yaml
+# Singleton -- Java (korrigiert)
+id: singleton-quality-java
+message: Class looks like a Singleton (private static instance field) but its constructor is not private (or is left implicit)
+severity: warning
+language: Java
+rule:
+  kind: class_declaration
+  all:
+    - has:
+        stopBy: end
+        kind: field_declaration
+        pattern:
+          context: 'class C { private static $TYPE instance; }'
+          selector: field_declaration
+    - any:
+        - not:
+            has:
+              stopBy: end
+              kind: constructor_declaration
+        - has:
+            stopBy: end
+            kind: constructor_declaration
+            not:
+              has:
+                kind: modifiers
+                regex: private
+---
+# Singleton -- Rust (korrigiert)
+id: singleton-quality-rust
+message: A public `new()` next to a module-level `static INSTANCE` of the same type defeats the Singleton -- callers can construct extra instances directly
+severity: warning
+language: Rust
+rule:
+  kind: impl_item
+  all:
+    - has:
+        field: type
+        pattern: $TYPE
+    - has:
+        stopBy: end
+        kind: function_item
+        pattern: pub fn new($$$PARAMS) -> $$$RET { $$$BODY }
+    - inside:
+        stopBy: end
+        kind: source_file
+        has:
+          stopBy: end
+          kind: static_item
+          any:
+            - pattern: 'static INSTANCE: $WRAPPER<$TYPE> = $$$INIT;'
+            - pattern: 'static INSTANCE: $TYPE = $$$INIT;'
+            - pattern: 'static mut INSTANCE: $WRAPPER<$TYPE> = $$$INIT;'
+            - pattern: 'static mut INSTANCE: $TYPE = $$$INIT;'
+---
+# Singleton -- TypeScript (korrigiert)
+id: singleton-quality-typescript
+message: Class looks like a Singleton (private static instance field) but its constructor is not private (or is left implicit)
+severity: warning
+language: TypeScript
+rule:
+  kind: class_declaration
+  all:
+    - has:
+        stopBy: end
+        kind: public_field_definition
+        pattern:
+          context: 'class C { private static instance: $TYPE; }'
+          selector: public_field_definition
+    - any:
+        - not:
+            has:
+              stopBy: end
+              kind: method_definition
+              has:
+                kind: property_identifier
+                regex: '^constructor$'
+        - has:
+            stopBy: end
+            kind: method_definition
+            has:
+              kind: property_identifier
+              regex: '^constructor$'
+            not:
+              has:
+                kind: accessibility_modifier
+                regex: '^private$'
+```

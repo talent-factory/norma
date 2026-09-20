@@ -158,6 +158,10 @@ impl PatternStore {
 
     /// Registers norma's default pattern set the first time the store is
     /// empty. Safe to call on every startup.
+    ///
+    /// Note: only seeds when the store is *completely* empty -- see
+    /// `DEVELOPMENT.md`'s "Upgrading from the MVP pattern set" section for
+    /// the upgrade gap this creates for pre-existing databases.
     pub async fn seed_defaults(&self) -> Result<()> {
         if !self.list_all_patterns().await?.is_empty() {
             return Ok(());
@@ -337,12 +341,12 @@ rule:
     }
 
     #[tokio::test]
-    async fn seed_defaults_loads_exactly_the_four_mvp_patterns_once() {
+    async fn seed_defaults_loads_all_twenty_default_patterns_once() {
         let store = test_store().await;
         store.seed_defaults().await.unwrap();
-        assert_eq!(store.list_all_patterns().await.unwrap().len(), 4);
+        assert_eq!(store.list_all_patterns().await.unwrap().len(), 20);
         // Calling it again must not duplicate or error.
         store.seed_defaults().await.unwrap();
-        assert_eq!(store.list_all_patterns().await.unwrap().len(), 4);
+        assert_eq!(store.list_all_patterns().await.unwrap().len(), 20);
     }
 }

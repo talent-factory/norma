@@ -1,9 +1,7 @@
 use clap::Parser;
 use norma::cli::{self, Cli, Command};
-use norma::models::ValidationResult;
 use norma::pattern_store::PatternStore;
 use norma::{mcp_server, pattern_engine};
-use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
 
@@ -53,7 +51,10 @@ async fn main() -> anyhow::Result<()> {
                 println!("{}", serde_json::to_string_pretty(&reports)?);
             } else {
                 for report in &reports {
-                    print_human_readable(&report.file, &report.result);
+                    println!(
+                        "{}",
+                        cli::render_human_readable(&report.file, &report.result)
+                    );
                 }
             }
             // Any file with violations fails the whole run -- that is what
@@ -75,45 +76,4 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
-}
-
-/// Prints a `ValidationResult` as `file:line:column: [severity] name -- text`
-/// lines, one per violation, plus a one-line summary -- the format
-/// `norma validate` uses without `--json` (this format is this function's
-/// own choice; the CLI/pre-commit ticket only decided that text-by-default
-/// vs. `--json` split, not the exact string). A synthetic coverage
-/// warning (see `pattern_engine::validate`) has no `matched_text`, so its
-/// `message` is shown instead.
-fn print_human_readable(file: &Path, result: &ValidationResult) {
-    if result.violations.is_empty() {
-        println!(
-            "{}: no violations ({} ms)",
-            file.display(),
-            result.duration_ms
-        );
-        return;
-    }
-    for v in &result.violations {
-        let detail = if v.matched_text.is_empty() {
-            &v.message
-        } else {
-            &v.matched_text
-        };
-        println!(
-            "{}:{}:{}: [{}] {} -- {}",
-            file.display(),
-            v.location.line + 1,
-            v.location.column + 1,
-            v.severity.as_str(),
-            v.pattern_name,
-            detail
-        );
-    }
-    println!(
-        "{} violation(s), score {:.2}, {} pattern(s) checked ({} ms)",
-        result.violations.len(),
-        result.score,
-        result.checked_patterns,
-        result.duration_ms
-    );
 }

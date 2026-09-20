@@ -79,9 +79,10 @@ norma/
 │   ├── mcp_server.rs        # MCP tool definitions & handlers
 │   ├── pattern_engine.rs    # Pattern matching & validation logic
 │   ├── pattern_store.rs     # SQLite persistence layer
-│   └── default_patterns.rs # The four MVP "no debug print" patterns
+│   └── default_patterns.rs # 20 default patterns: 4 MVP "no debug print" + 16 GoF
 ├── tests/
-│   └── dogfooding.rs        # norma validates its own src/ with its own Rust pattern
+│   ├── dogfooding.rs        # norma validates its own src/ with its own Rust pattern
+│   └── gof_patterns.rs      # Behavioral tests for the GoF v2 pattern set
 ├── docs/adr/                # Architecture decision records
 ├── Cargo.toml               # Rust dependencies
 └── README.md
@@ -106,7 +107,7 @@ A `Pattern` is single-language (see [ADR 0002](docs/adr/0002-pattern-single-lang
 }
 ```
 
-Register one via the `register_pattern` MCP tool, or in Rust via `PatternStore::register_pattern(name, description, category, rule_yaml)` -- see `src/default_patterns.rs` for the four patterns norma ships with.
+Register one via the `register_pattern` MCP tool, or in Rust via `PatternStore::register_pattern(name, description, category, rule_yaml)` -- see `src/default_patterns.rs` for the 20 patterns norma ships with.
 
 ## 🔧 Development
 
@@ -145,8 +146,12 @@ norma is designed to help you:
 
 ### Example: catching `System.out.println` in Java
 
-This is one of the four patterns norma ships with (`src/default_patterns.rs`).
-The rule is a full ast-grep `RuleConfig` YAML document:
+This is one of the 20 patterns norma ships with (`src/default_patterns.rs`),
+which now also includes four Gang-of-Four patterns (Singleton, Factory,
+Observer, Strategy) per language -- see DEVELOPMENT.md's
+[Pattern Definition Examples](DEVELOPMENT.md#pattern-definition-examples)
+section for the Java Singleton example. The rule shown here is a full
+ast-grep `RuleConfig` YAML document:
 
 ```yaml
 id: no-debug-print-java

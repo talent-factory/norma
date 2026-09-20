@@ -198,7 +198,7 @@ mod tests {
         let server = test_server().await;
         let json = server.list_patterns().await.unwrap();
         let patterns: Vec<Pattern> = serde_json::from_str(&json).unwrap();
-        assert_eq!(patterns.len(), 4);
+        assert_eq!(patterns.len(), 20);
     }
 
     #[tokio::test]
