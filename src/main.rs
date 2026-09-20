@@ -1,50 +1,70 @@
-use mcpkit::prelude::*;
+use clap::Parser;
+use norma::cli::{Cli, Command};
+use norma::models::ValidationResult;
+use norma::pattern_store::PatternStore;
+use norma::{mcp_server, pattern_engine};
+use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{info, error};
-
-mod models;
-mod mcp_server;
-mod pattern_engine;
-mod pattern_store;
-
-use mcp_server::NormaMcpServer;
-use pattern_store::PatternStore;
+use tracing::info;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .with_level(true)
-        .init();
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt().with_target(false).init();
 
-    info!("Starting norma MCP server v0.1.0");
+    let cli = Cli::parse();
+    let store = Arc::new(PatternStore::new("norma.db").await?);
+    store.seed_defaults().await?;
 
-    // Initialize pattern store (SQLite)
-    let pattern_store = PatternStore::new("norma.db").await?;
-    
-    // Ensure default patterns are loaded
-    pattern_store.initialize_defaults().await?;
-    
-    info!("Pattern store initialized");
-
-    // Create MCP server instance
-    let server = NormaMcpServer::new(Arc::new(pattern_store));
-
-    // Setup transport (stdio)
-    let transport = (tokio::io::stdin(), tokio::io::stdout());
-    
-    info!("MCP transport established, waiting for connections...");
-
-    // Run server
-    let server = server.serve(transport).await?;
-    
-    info!("Server initialized, waiting for shutdown...");
-    
-    let quit_reason = server.waiting().await?;
-    
-    info!("Server shutting down: {:?}", quit_reason);
-
+    match cli.command {
+        Command::Serve => {
+            info!("starting norma MCP server on stdio");
+            mcp_server::serve(store).await?;
+        }
+        Command::Validate { file, language, json } => {
+            let code = std::fs::read_to_string(&file)?;
+            let patterns = store.get_patterns_for_language(&language).await?;
+            let result = pattern_engine::validate(&code, &language, &patterns);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                print_human_readable(&file, &result);
+            }
+            if !result.passed {
+                std::process::exit(1);
+            }
+        }
+        Command::ListPatterns => {
+            for p in store.list_all_patterns().await? {
+                println!("{:<28} {:<10} [{}] {}", p.id, p.language, p.severity.as_str(), p.name);
+            }
+        }
+    }
     Ok(())
+}
+
+/// Prints a `ValidationResult` as `file:line:column: [severity] name -- text`
+/// lines, one per violation, plus a one-line summary -- the format
+/// `norma validate` uses without `--json` (see the CLI/pre-commit ticket).
+fn print_human_readable(file: &Path, result: &ValidationResult) {
+    if result.violations.is_empty() {
+        println!("{}: no violations ({} ms)", file.display(), result.duration_ms);
+        return;
+    }
+    for v in &result.violations {
+        println!(
+            "{}:{}:{}: [{}] {} -- {}",
+            file.display(),
+            v.location.line + 1,
+            v.location.column + 1,
+            v.severity.as_str(),
+            v.pattern_name,
+            v.matched_text
+        );
+    }
+    println!(
+        "{} violation(s), score {:.2} ({} ms)",
+        result.violations.len(),
+        result.score,
+        result.duration_ms
+    );
 }
