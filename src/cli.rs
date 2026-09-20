@@ -1,4 +1,4 @@
-use crate::models::Pattern;
+use crate::models::{Pattern, Severity, ValidationResult};
 use crate::pattern_engine;
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -73,6 +73,61 @@ pub fn validate_files(
         });
     }
     Ok(reports)
+}
+
+/// Renders a `ValidationResult` as `file:line:column: [severity] name -- text`
+/// lines, one per violation, plus a one-line summary -- the format
+/// `norma validate` uses without `--json`. A synthetic coverage warning
+/// (see `pattern_engine::validate`) has no `matched_text`, so its
+/// `message` is shown instead.
+///
+/// Returns a `String` (rather than printing directly) so the
+/// blocking/informational split below is covered by `cargo test --lib`
+/// instead of only by hand -- `main.rs` does the actual `println!`.
+///
+/// The summary line separates blocking violations (`warning`/`error`
+/// severity, the ones `pattern_engine::validate`'s severity-aware scoring
+/// counts against `score`/`passed`) from informational ones (`off`/`hint`/
+/// `info`, like the `observer-presence-*` patterns) -- printing a single
+/// combined count next to `score` would misleadingly read as a
+/// contradiction (e.g. "1 violation(s), score 1.00") when every violation
+/// found was purely informational.
+pub fn render_human_readable(file: &Path, result: &ValidationResult) -> String {
+    if result.violations.is_empty() {
+        return format!(
+            "{}: no violations ({} ms)",
+            file.display(),
+            result.duration_ms
+        );
+    }
+    let mut out = String::new();
+    for v in &result.violations {
+        let detail = if v.matched_text.is_empty() {
+            &v.message
+        } else {
+            &v.matched_text
+        };
+        out.push_str(&format!(
+            "{}:{}:{}: [{}] {} -- {}\n",
+            file.display(),
+            v.location.line + 1,
+            v.location.column + 1,
+            v.severity.as_str(),
+            v.pattern_name,
+            detail
+        ));
+    }
+    let blocking = result
+        .violations
+        .iter()
+        .filter(|v| matches!(v.severity, Severity::Warning | Severity::Error))
+        .count();
+    let informational = result.violations.len() - blocking;
+    out.push_str(&format!(
+        "{} violation(s) ({} informational), score {:.2}, {} pattern(s) checked ({} ms)",
+        blocking, informational, result.score, result.checked_patterns, result.duration_ms
+    ));
+    out
 }
 
 /// Decides where norma's SQLite registry lives, in precedence order:
@@ -291,6 +346,53 @@ rule:
         assert!(
             err.to_string().contains("does/not/exist.rs"),
             "unexpected error: {err}"
+        );
+    }
+
+    // --- render_human_readable --------------------------------------------
+
+    /// A warning-severity match mixed with an info-severity one must not
+    /// render as the self-contradictory "N violation(s), score 1.00" --
+    /// see `render_human_readable`'s doc comment.
+    #[test]
+    fn render_human_readable_splits_blocking_from_informational_counts() {
+        use crate::models::{CodeLocation, PatternViolation, Severity, ValidationResult};
+
+        let location = CodeLocation {
+            file: None,
+            line: 0,
+            column: 0,
+        };
+        let result = ValidationResult {
+            violations: vec![
+                PatternViolation {
+                    pattern_id: "singleton-quality-rust".to_string(),
+                    pattern_name: "Singleton Implementation Quality".to_string(),
+                    severity: Severity::Warning,
+                    location: location.clone(),
+                    matched_text: "impl Config { pub fn new() -> Config { Config } }".to_string(),
+                    message: "d".to_string(),
+                },
+                PatternViolation {
+                    pattern_id: "observer-presence-rust".to_string(),
+                    pattern_name: "Observer Presence".to_string(),
+                    severity: Severity::Info,
+                    location,
+                    matched_text: "struct Publisher { observers: Vec<Box<dyn Observer>> }"
+                        .to_string(),
+                    message: "d".to_string(),
+                },
+            ],
+            passed: false,
+            score: 0.5,
+            checked_patterns: 2,
+            duration_ms: 1,
+        };
+
+        let rendered = render_human_readable(Path::new("src/lib.rs"), &result);
+        assert!(
+            rendered.contains("1 violation(s) (1 informational), score 0.50"),
+            "unexpected summary line, got: {rendered}"
         );
     }
 }
