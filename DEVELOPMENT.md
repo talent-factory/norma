@@ -93,8 +93,8 @@ rather than accepting them separately (see docs/adr/0002.md).
 Here is the real, shipped Java Singleton pattern (`singleton-quality-java`)
 -- a `kind`/`has` rule rather than a plain string pattern, since it needs
 to express a structural relationship (a private static instance field
-*inside* the class, and a constructor that is not private), not just a
-code shape:
+*inside* the class, and either no explicit constructor at all or one that
+is not private), not just a code shape:
 
 ```yaml
 id: singleton-quality-java
@@ -110,13 +110,18 @@ rule:
         pattern:
           context: 'class C { private static $TYPE instance; }'
           selector: field_declaration
-    - has:
-        stopBy: end
-        kind: constructor_declaration
-        not:
-          has:
-            kind: modifiers
-            regex: private
+    - any:
+        - not:
+            has:
+              stopBy: end
+              kind: constructor_declaration
+        - has:
+            stopBy: end
+            kind: constructor_declaration
+            not:
+              has:
+                kind: modifiers
+                regex: private
 ```
 
 ## 🔍 Testing Checklist

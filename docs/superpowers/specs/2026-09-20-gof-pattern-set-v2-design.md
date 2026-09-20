@@ -48,7 +48,7 @@ let scoring_violations = violations
     .count();
 let passed = scoring_violations == 0;
 let score = if checked_patterns == 0 {
-    1.0
+    0.0
 } else {
     (1.0 - scoring_violations as f64 / checked_patterns as f64).max(0.0)
 };
@@ -60,7 +60,7 @@ This keeps the existing `coverage_warning` synthetic entry's behavior intact (it
 
 Mirrors the MVP's per-module test structure:
 
-- **`pattern_engine.rs`:** two new tests -- an `info`-severity match appears in `violations` but leaves `passed: true` and `score: 1.0`; a `warning`-severity match still fails the run exactly as before (regression guard for the scoring change).
+- **`pattern_engine.rs`:** one new test -- an `info`-severity match appears in `violations` but leaves `passed: true` and `score: 1.0`. The `warning`-severity regression (a warning-severity match still fails the run exactly as before) is covered by the existing pre-PR test suite (`validate_finds_a_real_violation` and others), not a newly-added test.
 - **`default_patterns.rs`:** the existing `every_default_rule_parses_and_covers_one_mvp_language_each`-style test extended to 20 entries (4 MVP + 16 GoF), asserting every rule parses, every rule's derived language is one of the four supported languages, and (new) that the id prefix (`singleton-`/`factory-`/`observer-`/`strategy-`) maps to the expected `category` (`creational`/`behavioral`).
 - **New pattern-behavior tests:** for each of the 4 GoF patterns, at least one positive-match and one negative-match test in `pattern_engine.rs`'s test module (or a new `tests/gof_patterns.rs` integration test, whichever the implementation plan's task breakdown finds cleaner) -- using the exact source snippets already verified in Ticket 06, so the plan's tests aren't inventing new unverified examples.
 - **`tests/dogfooding.rs`:** unchanged; optionally note in a comment that norma's own source also contains no Singleton/Factory/Observer/Strategy shapes, but this isn't asserted as a new test (norma's source is simple enough that this would be redundant with the existing "no debug print" dogfooding check).
@@ -68,9 +68,10 @@ Mirrors the MVP's per-module test structure:
 ## Known limitations (documented, not fixed here)
 
 - **Factory/Strategy can't distinguish "two branches" from "many branches"** -- `ast-grep`'s declarative rule format has no counting/aggregation primitive, so the rule matches on the *shape* "at least one `if`/`else if` pair, each doing X", not "N or more branches". A two-branch `if`/`else` that happens to construct two different logging adapters would technically match; this is an acceptable false-positive rate for a teaching tool flagging a *smell to think about*, not a hard rule violation like `no-debug-print`.
-- **Rust and TypeScript don't have Java/Python-style classes**, so Singleton/Observer for those two languages target the nearest idiomatic equivalent (`struct`+`impl` for Rust, unchanged `class` for TypeScript) rather than a literal translation of the Java shape.
+- **Rust doesn't have Java/Python-style classes**, so Observer for Rust targets the nearest idiomatic equivalent (`struct_item`) rather than a literal translation of the Java shape. Singleton for Rust instead targets `impl_item` (anchored to the `impl` block itself, not the whole file), cross-checked via a shared `$TYPE` metavariable against a module-level `static INSTANCE` of that same type. TypeScript keeps its unchanged `class` shape for both patterns.
 - **Severity `info` matches still show up in `PatternViolation`s named field `message`/`matched_text`** exactly like warnings -- consumers that don't check `severity` before deciding "is this bad" will still see Observer sightings mixed into the same list. This is intentional per the design above (visibility without penalty), not a bug to fix in this pass.
 - **`factory-overuse-python` and `strategy-overuse-python` are structurally the same rule** -- tree-sitter-python's `call` node carries no type information, so there is no AST-kind distinction between "constructing a type" (`Dog()`) and "calling a method" (`pay_by_card()`) for ast-grep to match on; both rules end up matching identically on any `if`/`elif` type-switch, under different metavariable names. This means every Python type-switch is double-reported with contradictory advice ("extract a Factory" vs. "extract a Strategy") for the same code, and the validation score is doubly penalized for Python relative to the other three languages. Java, Rust, and TypeScript aren't affected, because their grammars distinguish construction from plain calls at the AST-kind level (`object_creation_expression`/`new_expression` vs. `method_invocation`/`call_expression` in Java/TypeScript, struct-literal expressions vs. `call_expression` in Rust). Properly disambiguating the two Python rules would require re-verifying changed YAML against real `ast-grep-core`, which is out of scope for this release; this is accepted as a known limitation and deferred to a future pattern-set revision.
+- **`strategy-overuse-java`'s pattern only matches unqualified calls** -- `$METHOD1($$$ARGS1)` binds only to a bare method call like `payByCard()`, not a receiver-qualified dispatch like `card.pay()`, which is arguably the more canonical Strategy-type-switch smell (selecting between different objects' methods rather than different free-standing methods). The TypeScript/Rust/Python siblings' identically-shaped patterns also bind to qualified/member-expression calls, so this is a Java-specific gap, not a cross-language design choice. Fixing it would need its own dedicated re-verification pass against real `ast-grep-core`, so it is deferred to a future revision rather than fixed here.
 
 ## Open questions
 
