@@ -14,17 +14,14 @@ This document outlines the current state of the norma project and the next steps
 - [x] Dogfooding integration test: the Rust "no debug print" default pattern run against norma's own `src/`, skipping `main.rs` (its `println!` calls are legitimate CLI output, not a debug leftover) -- `tests/dogfooding.rs`
 - [x] Pre-commit hook template (`.pre-commit-config.yaml`), `language: system` so pre-commit calls the already-installed `norma` binary instead of compiling Rust on every run
 - [x] README and DEVELOPMENT docs brought in line with the above
+- [x] Four GoF default patterns (Singleton, Factory, Observer, Strategy), one per MVP language (16 patterns total, 20 with the MVP set) -- `singleton-quality-*`/`factory-overuse-*` under category `creational`, `observer-presence-*`/`strategy-overuse-*` under category `behavioral`; `observer-presence-*` is `info`-severity and (per `pattern_engine::validate`'s severity-aware scoring) visible without failing a run -- `src/default_patterns.rs`, `docs/superpowers/specs/2026-09-20-gof-pattern-set-v2-design.md`
 
 ### 🔄 Next Steps
 
 1. **Test strategy** (Priority: Medium)
    - The wayfinder map (`.scratch/norma-architecture/map.md`, section "Not yet specified") deliberately left the overall unit/integration/E2E test strategy unresolved for the spec phase -- it didn't block implementation, and each task supplied its own tests as it went (unit tests next to `pattern_engine`, `pattern_store`, `cli`, `default_patterns`, plus the `tests/dogfooding.rs` integration test). Revisit explicitly if a real gap shows up, e.g. dedicated end-to-end MCP-protocol coverage.
 
-2. **v2 pattern set, including GoF patterns** (Priority: Medium)
-   - The MVP deliberately shipped one pattern per language and deferred classic Gang-of-Four checks (Singleton, Factory, Observer, Strategy, ...) -- see the "MVP-Pattern-Set-Scope" ticket (`.scratch/norma-architecture/issues/05-mvp-pattern-set-scope.md`). A v2 set should add these, each verified against real `ast-grep-core` the same way the v1 defaults were.
-   - Location: `src/default_patterns.rs`
-
-3. **Performance optimization** (Priority: Low)
+2. **Performance optimization** (Priority: Low)
    - Benchmark pattern matching, cache compiled ast-grep rules, tune the SQLite connection pool.
    - Location: `src/pattern_engine.rs`, `src/pattern_store.rs`
 
@@ -62,30 +59,43 @@ cargo build --release
 
 ## 📝 Pattern Definition Examples
 
-See `src/default_patterns.rs` for the four patterns norma ships with (one
-per MVP language, all expressing "no debug print"), and the README's
+See `src/default_patterns.rs` for the 20 patterns norma ships with (the
+four MVP "no debug print" patterns, one per language, plus 16 GoF
+patterns -- Singleton, Factory, Observer, Strategy, one per MVP language
+each), and the README's
 [Pattern Definition Format](README.md#pattern-definition-format) section
 for the shape a `rule` YAML document needs. There is no `Pattern::new`
 constructor -- `Pattern::from_rule` (`src/pattern_engine.rs`) is the only
 way to build one, and it derives `id`/`language`/`severity` from the YAML
 rather than accepting them separately (see docs/adr/0002.md).
 
-A v2 GoF pattern (see "Next Steps" above) would look like this for Java
-Singleton -- a `kind`/`has` rule rather than a plain string pattern, since
-it needs to express a structural relationship (a private static field
-*inside* the class), not just a code shape:
+Here is the real, shipped Java Singleton pattern (`singleton-quality-java`)
+-- a `kind`/`has` rule rather than a plain string pattern, since it needs
+to express a structural relationship (a private static instance field
+*inside* the class, and a constructor that is not private), not just a
+code shape:
 
 ```yaml
-id: java-singleton
-message: Enforce proper Singleton pattern implementation
+id: singleton-quality-java
+message: Class looks like a Singleton (private static instance field) but its constructor is not private
 severity: warning
 language: Java
 rule:
   kind: class_declaration
-  has:
-    kind: field_declaration
-    # ... the actual field/method shape is still to be worked out
-    # against real ast-grep-core, the same way the v1 defaults were.
+  all:
+    - has:
+        stopBy: end
+        kind: field_declaration
+        pattern:
+          context: 'class C { private static $TYPE instance; }'
+          selector: field_declaration
+    - has:
+        stopBy: end
+        kind: constructor_declaration
+        not:
+          has:
+            kind: modifiers
+            regex: private
 ```
 
 ## 🔍 Testing Checklist
