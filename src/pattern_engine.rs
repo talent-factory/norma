@@ -523,9 +523,19 @@ rule:
         let pattern = test_pattern(RUST_OBSERVER_PRESENCE_INFO);
         let source = "struct Publisher { observers: Vec<Box<dyn Observer>> }";
         let result = validate(source, "rust", &[pattern]).unwrap();
-        assert_eq!(result.violations.len(), 1, "the match must still be visible");
+        assert_eq!(
+            result.violations.len(),
+            1,
+            "the match must still be visible"
+        );
         assert_eq!(result.violations[0].severity, Severity::Info);
-        assert!(result.passed, "an info-severity match must not fail the run");
-        assert_eq!(result.score, 1.0, "an info-severity match must not lower the score");
+        assert!(
+            result.passed,
+            "an info-severity match must not fail the run"
+        );
+        assert_eq!(
+            result.score, 1.0,
+            "an info-severity match must not lower the score"
+        );
     }
 }
