@@ -425,4 +425,33 @@ mod tests {
         languages.dedup();
         assert_eq!(languages, ["java", "python", "rust", "typescript"]);
     }
+
+    #[test]
+    fn the_default_pattern_set_has_exactly_20_entries_after_the_gof_v2_addition() {
+        assert_eq!(ALL.len(), 20);
+    }
+
+    #[test]
+    fn every_default_pattern_id_prefix_matches_its_expected_category() {
+        let expected_category = |id: &str| -> &'static str {
+            if id.starts_with("no-debug-print-") {
+                "code-quality"
+            } else if id.starts_with("singleton-") || id.starts_with("factory-") {
+                "creational"
+            } else if id.starts_with("observer-") || id.starts_with("strategy-") {
+                "behavioral"
+            } else {
+                panic!("no expected category mapping for pattern id {id:?} -- update this test's mapping when adding a new pattern family");
+            }
+        };
+        for def in ALL {
+            let config = parse_rule(def.rule).expect("default rule must parse");
+            assert_eq!(
+                def.category,
+                expected_category(&config.id),
+                "category mismatch for {}",
+                config.id
+            );
+        }
+    }
 }
