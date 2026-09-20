@@ -125,6 +125,12 @@ fn singleton_quality_rust() {
         "rust",
         "static INSTANCE: Config = Config;\nstruct Config;\nimpl Config { pub fn new() -> Config { Config } }",
     );
+    // `static mut` is an equally in-scope Singleton shape, not just `static`.
+    assert_matches(
+        "singleton-quality-rust",
+        "rust",
+        "static mut INSTANCE: Option<Config> = None;\nstruct Config;\nimpl Config { pub fn new() -> Self { Self } }",
+    );
 }
 
 #[test]
