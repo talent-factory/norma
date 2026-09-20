@@ -1,125 +1,147 @@
 # norma Quick Start
 
-Get **norma** running in 5 minutes.
+Get **norma** running in 5 minutes. For the full reference see
+[README.md](README.md); for contributor workflow see
+[DEVELOPMENT.md](DEVELOPMENT.md).
 
-## 1️⃣ Prerequisites
+## 1. Prerequisites
 
-- Rust 1.70+ — [Install rustup](https://rustup.rs/)
+- Rust stable (see `rust-toolchain.toml`) — [install rustup](https://rustup.rs/)
 - Git
-- SQLite 3.0+ (usually pre-installed)
 
-## 2️⃣ Build
+SQLite is bundled with norma, so there is nothing to install for it.
+
+## 2. Build
 
 ```bash
-cd norma
 cargo build --release
 ```
 
-Takes ~2-3 minutes on first build.
+Takes a few minutes on the first build.
 
-## 3️⃣ Run the MCP Server
-
-```bash
-./target/release/norma
-```
-
-Server is ready when you see:
-```
-Pattern store initialized with SQLite
-MCP transport established, waiting for connections...
-```
-
-## 4️⃣ Test with MCP Inspector
-
-In a new terminal:
+## 3. Install (optional but recommended)
 
 ```bash
-# Install MCP Inspector (global)
-npm install -g @modelcontextprotocol/inspector
-
-# Connect to norma
-mcp-inspector stdio /path/to/norma/target/release/norma
+cargo install --path .
 ```
 
-Opens a browser interface. Try calling:
+This puts `norma` on your `PATH`. Without it, replace every `norma ...`
+below with `cargo run -- ...` (debug build) or
+`./target/release/norma ...`.
 
-```
-get_pattern_checklist(language: "java")
-```
-
-Expected response:
-```json
-[
-  {
-    "id": "java-static-import",
-    "name": "Avoid Static Imports",
-    "description": "Discourage wildcard static imports in Java",
-    "severity": "warning",
-    "enabled": true
-  },
-  ...
-]
-```
-
-## 5️⃣ Use with Claude Code
-
-1. Copy `.claude.example.json` to `.claude.json` in your project root
-2. Update the path to your norma binary
-3. Restart Claude Code
-4. Use in prompts:
-
-```
-@tool validate_pattern_compliance
-code: """
-public class MyClass {
-    public static void main(String[] args) {
-        System.out.println("Hello");
-    }
-}
-"""
-language: "java"
-```
-
-## 🎯 Next Steps
-
-See **DEVELOPMENT.md** for:
-- AST-grep integration
-- Custom pattern definition
-- Pre-commit hook setup
-- Test suite expansion
-
-## 🆘 Troubleshooting
-
-### Build fails with "mcpkit not found"
+## 4. Look at the built-in patterns
 
 ```bash
-# Update dependencies
-cargo update
-cargo build --release
+norma list-patterns
 ```
 
-### Rust not found
+On first run norma seeds its 20 default patterns -- the four MVP "no debug
+print" patterns plus 16 Gang-of-Four patterns (Singleton, Factory,
+Observer, Strategy), one per language -- and prints them:
+
+```
+factory-overuse-java         java       [warning] Factory Overuse (Type Switch)
+no-debug-print-java          java       [warning] No Debug Print
+observer-presence-java       java       [info] Observer Presence
+singleton-quality-java       java       [warning] Singleton Implementation Quality
+strategy-overuse-java        java       [warning] Strategy Overuse (Type Switch)
+factory-overuse-python       python     [warning] Factory Overuse (Type Switch)
+no-debug-print-python        python     [warning] No Debug Print
+observer-presence-python     python     [info] Observer Presence
+singleton-quality-python     python     [warning] Singleton Implementation Quality
+strategy-overuse-python      python     [warning] Strategy Overuse (Type Switch)
+factory-overuse-rust         rust       [warning] Factory Overuse (Type Switch)
+no-debug-print-rust          rust       [warning] No Debug Print
+observer-presence-rust       rust       [info] Observer Presence
+singleton-quality-rust       rust       [warning] Singleton Implementation Quality
+strategy-overuse-rust        rust       [warning] Strategy Overuse (Type Switch)
+factory-overuse-typescript   typescript [warning] Factory Overuse (Type Switch)
+no-debug-print-typescript    typescript [warning] No Debug Print
+observer-presence-typescript typescript [info] Observer Presence
+singleton-quality-typescript typescript [warning] Singleton Implementation Quality
+strategy-overuse-typescript  typescript [warning] Strategy Overuse (Type Switch)
+```
+
+The registry lives at `$XDG_DATA_HOME/norma/norma.db` (or
+`$HOME/.local/share/norma/norma.db` if `$XDG_DATA_HOME` isn't set). Point
+norma somewhere else with the global `--db <PATH>` flag or the `NORMA_DB`
+environment variable.
+
+## 5. Validate a file
 
 ```bash
-# Install Rust
+norma validate --language rust src/models.rs
+```
+
+(`src/main.rs` is a bad first example here: its whole job is printing to
+stdout, so it trips the "no debug print" pattern -- see
+`tests/dogfooding.rs`'s comment on excluding it from norma's self-check.)
+
+`validate` takes one or more files as positional arguments, so globs work
+too. Add `--json` for machine-readable output (a JSON array with one
+`{"file": ..., "result": ...}` entry per file):
+
+```bash
+norma validate --language rust --json src/*.rs
+```
+
+The exit status is non-zero if any file has violations — which is what
+makes it usable as a pre-commit hook. Supported languages are `java`,
+`python`, `rust` and `typescript`; anything else is a hard error rather
+than a silent pass.
+
+## 6. Run the MCP server
+
+```bash
+norma serve
+```
+
+`serve` speaks JSON-RPC over stdio, so it looks like it is hanging — that
+is correct; it is waiting for an MCP client. Logs go to stderr, never
+stdout. Stop it with `Ctrl-C`.
+
+Register it with Claude Code:
+
+```bash
+claude mcp add norma -- norma serve
+```
+
+Or try it with the MCP Inspector:
+
+```bash
+npx @modelcontextprotocol/inspector norma serve
+```
+
+Then call, for example, `get_pattern_checklist` with `language: "java"`,
+or `validate_pattern_compliance` with some code and a language.
+
+## 7. Wire up the pre-commit hook
+
+With `norma` installed (step 3) and [pre-commit](https://pre-commit.com/)
+available:
+
+```bash
+pre-commit install
+```
+
+`.pre-commit-config.yaml` runs `norma validate --language rust --json`
+over every staged `.rs` file on each commit.
+
+## Troubleshooting
+
+**`norma: command not found`** — you skipped `cargo install --path .`, or
+`~/.cargo/bin` is not on your `PATH`.
+
+**`Error: unsupported language: "go"`** — norma's MVP set covers Java,
+Python, Rust and TypeScript only. This is deliberate: a language with no
+patterns would otherwise report a meaningless "no violations".
+
+**`norma serve` prints nothing** — expected. It is an stdio MCP server.
+Use `RUST_LOG=info norma serve` to see its (stderr) logs.
+
+**Rust not installed:**
+
+```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
+source "$HOME/.cargo/env"
 ```
-
-### SQLite error
-
-```bash
-# Ensure SQLite is installed
-# macOS:
-brew install sqlite3
-
-# Linux (Ubuntu):
-sudo apt-get install sqlite3 libsqlite3-dev
-
-# Windows: Usually included, verify:
-sqlite3 --version
-```
-
----
-
-**Ready to code?** Jump into `DEVELOPMENT.md` for the roadmap.

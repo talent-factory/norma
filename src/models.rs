@@ -1,99 +1,208 @@
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
-use uuid::Uuid;
+use serde::{Deserialize, Serialize};
 
-/// Severity level for pattern violations
+/// Severity level for a pattern violation.
+///
+/// Mirrors `ast_grep_config::Severity` (see docs/adr/0002.md and
+/// `pattern_engine::parse_rule`): norma derives this from the parsed rule
+/// YAML at register time rather than accepting it as a separate input, so
+/// a `Pattern`'s severity can never drift from the YAML that actually
+/// produced it.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
+    Off,
+    Hint,
     Info,
     Warning,
     Error,
-    Critical,
 }
 
-/// A code pattern definition
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl Severity {
+    /// Parses the lowercase string form used in the `patterns.severity`
+    /// SQLite column (see `as_str`). Returns `None` for anything else.
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "off" => Some(Severity::Off),
+            "hint" => Some(Severity::Hint),
+            "info" => Some(Severity::Info),
+            "warning" => Some(Severity::Warning),
+            "error" => Some(Severity::Error),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Severity::Off => "off",
+            Severity::Hint => "hint",
+            Severity::Info => "info",
+            Severity::Warning => "warning",
+            Severity::Error => "error",
+        }
+    }
+}
+
+/// A registered code pattern.
+///
+/// Per docs/adr/0002.md, one row is always single-language: an idea that
+/// should hold across several languages (e.g. "no debug prints") becomes
+/// several `Pattern` rows, one per language, related only by a shared
+/// `name` -- there is no data-level link between them.
+///
+/// `id`, `language`, and `severity` are `pub(crate)` rather than `pub`,
+/// and there is no public struct-literal constructor: the only way to
+/// build one is [`Pattern::from_rule`], which derives all three from
+/// `rule` and cannot be called with mismatched values. Without this, the
+/// ADR 0002 invariant ("these three always match what parsing `rule`
+/// produces") was only convention enforced by one caller
+/// (`PatternStore::register_pattern`) -- nothing stopped a different call
+/// site from building an inconsistent `Pattern` by hand. See
+/// [`Pattern::from_trusted_row`] for the one sanctioned way to skip
+/// re-deriving them (reading a row `PatternStore` already validated at
+/// write time).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(test, derive(Deserialize))]
 pub struct Pattern {
-    pub id: String,
+    /// The ast-grep RuleConfig `id` from the YAML in `rule`, e.g. `"no-debug-print-rust"`.
+    id: String,
+    /// norma's catalog name. Repeats across the language variants of one idea.
     pub name: String,
+    /// norma's own, longer explanation (ast-grep's own `message` field
+    /// inside `rule` is documented as "should be single line and concise").
     pub description: String,
-    pub rule: String,               // AST-grep pattern
-    pub rewrite: Option<String>,    // Optional rewrite rule
-    pub severity: Severity,
-    pub languages: Vec<String>,     // e.g., ["java", "typescript"]
+    /// Free-text grouping, e.g. `"code-quality"`, `"creational"`. Not a fixed enum.
+    pub category: Option<String>,
+    /// norma's canonical language key: `"java"` | `"python"` | `"rust"` | `"typescript"`.
+    language: String,
+    /// Derived from the parsed `rule` YAML when the pattern was registered.
+    severity: Severity,
+    /// The full ast-grep RuleConfig YAML document (id/message/severity/language/rule/fix).
+    rule: String,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 impl Pattern {
-    /// Create a new pattern with defaults
-    pub fn new(
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn language(&self) -> &str {
+        &self.language
+    }
+
+    pub fn severity(&self) -> Severity {
+        self.severity
+    }
+
+    pub fn rule(&self) -> &str {
+        &self.rule
+    }
+
+    /// Reconstructs a `Pattern` from a SQLite row `PatternStore` already
+    /// wrote via [`Pattern::from_rule`] (see `pattern_store::row_to_pattern`).
+    /// Skips re-parsing `rule` for performance, trusting that `id`,
+    /// `language`, and `severity` still agree with it -- named distinctly
+    /// from `from_rule` so it's visually obvious, at the one call site
+    /// that uses it, that this path does not re-derive anything.
+    ///
+    /// One argument per `patterns` column by design (this exists to
+    /// reconstruct exactly that row); a params struct would only move the
+    /// verbosity to its one construction site instead of removing it.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_trusted_row(
+        id: String,
         name: String,
         description: String,
+        category: Option<String>,
+        language: String,
+        severity: Severity,
         rule: String,
-        languages: Vec<String>,
+        enabled: bool,
+        created_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
     ) -> Self {
-        let now = Utc::now();
         Self {
-            id: Uuid::new_v4().to_string(),
+            id,
             name,
             description,
+            category,
+            language,
+            severity,
             rule,
-            rewrite: None,
-            severity: Severity::Warning,
-            languages,
-            enabled: true,
-            created_at: now,
-            updated_at: now,
+            enabled,
+            created_at,
+            updated_at,
         }
     }
 }
 
-/// A violation found in code
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A single match of a `Pattern` against a piece of code.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PatternViolation {
     pub pattern_id: String,
     pub pattern_name: String,
     pub severity: Severity,
     pub location: CodeLocation,
+    pub matched_text: String,
     pub message: String,
-    pub suggestion: Option<String>,
 }
 
-/// Location in code where violation was found
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A position ast-grep matched at. `line` and `column` are zero-based, as
+/// ast-grep-core's own `Position` type documents them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CodeLocation {
-    pub file: String,
-    pub line: u32,
-    pub column: u32,
+    pub file: Option<String>,
+    pub line: usize,
+    pub column: usize,
 }
 
-/// Result of pattern validation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The result of validating one piece of code against a set of patterns.
+///
+/// `checked_patterns` exists so "clean" and "nothing was checked" are never
+/// indistinguishable: without it, a request for a language with zero
+/// enabled patterns (or one whose only patterns all failed to parse) would
+/// produce the exact same `passed: true, violations: []` as a genuinely
+/// clean result. `pattern_engine::validate` also pushes a synthetic,
+/// `Warning`-severity entry into `violations` in that case, so the
+/// degraded coverage is visible in ordinary output too, not just in a
+/// field a caller has to know to check.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ValidationResult {
     pub violations: Vec<PatternViolation>,
     pub passed: bool,
-    pub score: f64,  // 0.0 - 1.0
+    /// 1.0 = no violations relative to the number of patterns checked, 0.0 = worst case.
+    /// Always 0.0 when `checked_patterns == 0` -- there is nothing to be
+    /// confidently clean about.
+    pub score: f64,
+    /// How many patterns were actually parsed and run. Excludes patterns
+    /// that were skipped because their stored `rule` no longer parses.
+    pub checked_patterns: usize,
     pub duration_ms: u128,
 }
 
-/// Request to validate code
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValidateRequest {
-    pub code: String,
-    pub language: String,
-    pub file_path: Option<String>,
-    pub patterns: Option<Vec<String>>, // Pattern IDs to check, None = all
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Pattern registration request
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegisterPatternRequest {
-    pub name: String,
-    pub description: String,
-    pub rule: String,
-    pub languages: Vec<String>,
-    pub severity: Option<Severity>,
+    #[test]
+    fn severity_round_trips_through_its_string_form() {
+        for severity in [
+            Severity::Off,
+            Severity::Hint,
+            Severity::Info,
+            Severity::Warning,
+            Severity::Error,
+        ] {
+            assert_eq!(Severity::parse(severity.as_str()), Some(severity));
+        }
+    }
+
+    #[test]
+    fn severity_parse_rejects_unknown_strings() {
+        assert_eq!(Severity::parse("critical"), None);
+        assert_eq!(Severity::parse(""), None);
+    }
 }
