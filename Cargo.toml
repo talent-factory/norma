@@ -18,6 +18,7 @@ path = "src/main.rs"
 [dependencies]
 # MCP server framework: official Rust SDK (see docs/adr/0001.md and ticket 01).
 rmcp = { version = "3", features = ["server", "transport-io", "schemars"] }
+schemars = "1"
 
 # AST-based pattern matching (see docs/adr/0002.md and tickets 02/04).
 # Pinned *exactly*: ast-grep's own docs say the Rust API is "not stable
