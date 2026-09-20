@@ -18,6 +18,7 @@ Eine Architektur-Spezifikation für norma (Rust MCP Server zur Design-Pattern-Va
 - [Pattern-Matching-Ansatz (grilling)](issues/02-pattern-matching-approach.md) — `ast-grep-core` (aktiv gepflegt, alle 4 MVP-Sprachen abgedeckt); Pattern-`rule`-Feld einheitlich im YAML-Rule-Format gespeichert.
 - [CLI/Pre-Commit-Architektur (grilling)](issues/03-cli-pre-commit-architecture.md) — ein Binary mit `clap`-Subcommands, geteilter async Core mit dem MCP-Server, Pre-Commit via `language: system`; siehe [ADR 0001](../../docs/adr/0001-single-binary-shared-validation-core.md).
 - [Pattern-Datenmodell & SQLite-Schema (grilling)](issues/04-pattern-data-model-schema.md) — breiter Scope (nicht nur GoF-Patterns), `Pattern` ist einsprachig (kein Join-Table), `rule` speichert die volle ast-grep-RuleConfig-YAML, Fail-Fast-Validierung beim Registrieren. Verifiziert per Probe gegen echtes `ast-grep-core`; siehe [ADR 0002](../../docs/adr/0002-pattern-single-language-full-rule-config.md).
+- [MVP-Pattern-Set-Scope (grilling)](issues/05-mvp-pattern-set-scope.md) — 1 Pattern pro Sprache (4 total), gemeinsames Konzept "kein Debug-Print" über Java/Python/Rust/TypeScript, kein GoF-Pattern in v1, Rust-Variante dient als Dogfooding-Demo gegen norma's eigenen `src/`-Ordner (aktuell 0 Treffer). Alle 4 Rules verifiziert.
 
 ## Not yet specified
 

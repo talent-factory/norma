@@ -13,6 +13,7 @@ fn try_rule(label: &str, yaml: &str, source: &str) {
 }
 
 fn main() {
+    debug_print_set();
     // TypeScript: forbid console.log(...)
     try_rule(
         "ts-console-log",
@@ -81,5 +82,44 @@ rule:
   pattern: console.log($$$ARGS)
 "#,
         "function greet() { logger.info('hi'); }",
+    );
+}
+
+fn debug_print_set() {
+    try_rule(
+        "java-debug-print",
+        r#"
+id: no-debug-print-java
+message: Avoid System.out.println in production code
+severity: warning
+language: Java
+rule:
+  pattern: System.out.println($$$ARGS)
+"#,
+        "class Foo { void bar() { System.out.println(\"debug\"); } }",
+    );
+    try_rule(
+        "rust-debug-print",
+        r#"
+id: no-debug-print-rust
+message: Avoid println! in production code
+severity: warning
+language: Rust
+rule:
+  pattern: println!($$$ARGS)
+"#,
+        "fn main() { println!(\"debug\"); }",
+    );
+    try_rule(
+        "rust-debug-print-negative-tracing",
+        r#"
+id: no-debug-print-rust
+message: Avoid println! in production code
+severity: warning
+language: Rust
+rule:
+  pattern: println!($$$ARGS)
+"#,
+        "fn main() { tracing::info!(\"structured, fine\"); }",
     );
 }
