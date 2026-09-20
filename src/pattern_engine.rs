@@ -217,11 +217,19 @@ pub fn validate(
 
     // Score is the real hit rate: computed before any synthetic coverage
     // warning is appended below, so it never divides by patterns that
-    // never actually ran.
+    // never actually ran. Only warning/error-severity matches count
+    // against the score -- an info/hint/off match (e.g. the purely
+    // informational `observer-presence-*` pattern) is still visible in
+    // `violations` below, but finding one isn't a defect, so it must not
+    // make the score worse.
+    let scoring_matches = violations
+        .iter()
+        .filter(|v| matches!(v.severity, Severity::Warning | Severity::Error))
+        .count();
     let score = if checked_patterns == 0 {
         0.0
     } else {
-        (1.0 - violations.len() as f64 / checked_patterns as f64).max(0.0)
+        (1.0 - scoring_matches as f64 / checked_patterns as f64).max(0.0)
     };
 
     for (pattern_id, err) in &skipped {
@@ -241,7 +249,13 @@ pub fn validate(
         ));
     }
 
-    let passed = violations.is_empty();
+    // `passed` mirrors `score`'s severity filter, checked after the
+    // synthetic coverage warnings above (also Warning-severity) are folded
+    // into `violations` -- degraded coverage must still fail a run exactly
+    // as before.
+    let passed = !violations
+        .iter()
+        .any(|v| matches!(v.severity, Severity::Warning | Severity::Error));
     Ok(ValidationResult {
         violations,
         passed,
@@ -489,5 +503,29 @@ rule:
             err.to_string().contains("unsupported language"),
             "unexpected error: {err}"
         );
+    }
+
+    const RUST_OBSERVER_PRESENCE_INFO: &str = r#"
+id: observer-presence-rust
+message: Struct has an observers-style field -- an Observer-shaped construct
+severity: info
+language: Rust
+rule:
+  kind: struct_item
+  has:
+    stopBy: end
+    kind: field_declaration
+    regex: observers
+"#;
+
+    #[test]
+    fn validate_info_severity_match_is_visible_but_does_not_fail_the_run() {
+        let pattern = test_pattern(RUST_OBSERVER_PRESENCE_INFO);
+        let source = "struct Publisher { observers: Vec<Box<dyn Observer>> }";
+        let result = validate(source, "rust", &[pattern]).unwrap();
+        assert_eq!(result.violations.len(), 1, "the match must still be visible");
+        assert_eq!(result.violations[0].severity, Severity::Info);
+        assert!(result.passed, "an info-severity match must not fail the run");
+        assert_eq!(result.score, 1.0, "an info-severity match must not lower the score");
     }
 }
