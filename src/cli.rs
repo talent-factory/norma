@@ -131,10 +131,19 @@ pub fn render_human_readable(file: &Path, result: &ValidationResult) -> String {
 }
 
 /// Decides where norma's SQLite registry lives, in precedence order:
-/// `--db`, then `$NORMA_DB`, then a fixed per-user path under `$HOME`.
-/// Takes the two environment values as plain arguments (rather than
-/// reading them itself) so this decision is testable without mutating
-/// process-global environment state.
+/// `--db`, then `$NORMA_DB`, then the XDG Base Directory data location
+/// (`$XDG_DATA_HOME/norma/norma.db`, honoring an override the same way
+/// `$XDG_DATA_HOME` itself is meant to), then a fixed per-user path under
+/// `$HOME` (`$HOME/.local/share/norma/norma.db` -- `$XDG_DATA_HOME`'s own
+/// documented default, used when the variable isn't set). Takes the
+/// environment values as plain arguments (rather than reading them
+/// itself) so this decision is testable without mutating process-global
+/// environment state.
+///
+/// This is `~/.local/share`, not `~/.config`: per the XDG spec,
+/// `$XDG_CONFIG_HOME` is for settings a user might edit or version
+/// (norma has none yet), `$XDG_DATA_HOME` is for persistent application
+/// *data* -- which is exactly what a pattern registry is.
 ///
 /// Deliberately never defaults to a bare relative filename when better
 /// information exists: a relative path would give the pre-commit hook a
@@ -145,6 +154,7 @@ pub fn render_human_readable(file: &Path, result: &ValidationResult) -> String {
 pub fn resolve_db_path(
     flag: Option<PathBuf>,
     norma_db_env: Option<String>,
+    xdg_data_home_env: Option<String>,
     home_env: Option<String>,
 ) -> PathBuf {
     if let Some(path) = flag {
@@ -152,6 +162,9 @@ pub fn resolve_db_path(
     }
     if let Some(env) = norma_db_env.filter(|v| !v.is_empty()) {
         return PathBuf::from(env);
+    }
+    if let Some(xdg_data_home) = xdg_data_home_env.filter(|v| !v.is_empty()) {
+        return Path::new(&xdg_data_home).join("norma/norma.db");
     }
     if let Some(home) = home_env.filter(|v| !v.is_empty()) {
         return Path::new(&home).join(".local/share/norma/norma.db");
@@ -241,24 +254,53 @@ mod tests {
         let path = resolve_db_path(
             Some(PathBuf::from("/explicit.db")),
             Some("/from-env.db".to_string()),
+            Some("/xdg-data".to_string()),
             Some("/home/daniel".to_string()),
         );
         assert_eq!(path, PathBuf::from("/explicit.db"));
     }
 
     #[test]
-    fn resolve_db_path_prefers_norma_db_env_over_home_default() {
+    fn resolve_db_path_prefers_norma_db_env_over_xdg_data_home() {
         let path = resolve_db_path(
             None,
             Some("/from-env.db".to_string()),
+            Some("/xdg-data".to_string()),
             Some("/home/daniel".to_string()),
         );
         assert_eq!(path, PathBuf::from("/from-env.db"));
     }
 
     #[test]
+    fn resolve_db_path_prefers_xdg_data_home_over_the_home_default() {
+        let path = resolve_db_path(
+            None,
+            None,
+            Some("/xdg-data".to_string()),
+            Some("/home/daniel".to_string()),
+        );
+        assert_eq!(path, PathBuf::from("/xdg-data/norma/norma.db"));
+    }
+
+    #[test]
+    fn resolve_db_path_ignores_an_empty_xdg_data_home_value() {
+        // An env var set to the empty string (e.g. `XDG_DATA_HOME=`) must
+        // not win over the $HOME-based default the way an unset one wouldn't.
+        let path = resolve_db_path(
+            None,
+            None,
+            Some(String::new()),
+            Some("/home/daniel".to_string()),
+        );
+        assert_eq!(
+            path,
+            PathBuf::from("/home/daniel/.local/share/norma/norma.db")
+        );
+    }
+
+    #[test]
     fn resolve_db_path_falls_back_to_a_fixed_path_under_home() {
-        let path = resolve_db_path(None, None, Some("/home/daniel".to_string()));
+        let path = resolve_db_path(None, None, None, Some("/home/daniel".to_string()));
         assert_eq!(
             path,
             PathBuf::from("/home/daniel/.local/share/norma/norma.db")
@@ -269,7 +311,12 @@ mod tests {
     fn resolve_db_path_ignores_an_empty_norma_db_value() {
         // An env var set to the empty string (e.g. `NORMA_DB=`) must not
         // win over the $HOME-based default the way an unset one wouldn't.
-        let path = resolve_db_path(None, Some(String::new()), Some("/home/daniel".to_string()));
+        let path = resolve_db_path(
+            None,
+            Some(String::new()),
+            None,
+            Some("/home/daniel".to_string()),
+        );
         assert_eq!(
             path,
             PathBuf::from("/home/daniel/.local/share/norma/norma.db")
@@ -278,7 +325,7 @@ mod tests {
 
     #[test]
     fn resolve_db_path_falls_back_to_a_bare_relative_name_when_home_is_unset() {
-        let path = resolve_db_path(None, None, None);
+        let path = resolve_db_path(None, None, None, None);
         assert_eq!(path, PathBuf::from("norma.db"));
     }
 

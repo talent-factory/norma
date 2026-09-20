@@ -50,10 +50,12 @@ norma list-patterns
 ### Where the pattern database lives
 
 norma stores its pattern registry in SQLite at a fixed per-user location
-(`$HOME/.local/share/norma/norma.db`) so the same registry is used no
-matter which directory norma is launched from. Override it per invocation
-with `--db <PATH>` (a global flag, valid on every subcommand) or globally
-with the `NORMA_DB` environment variable:
+(`$XDG_DATA_HOME/norma/norma.db`, or `$HOME/.local/share/norma/norma.db`
+if `$XDG_DATA_HOME` isn't set -- the XDG Base Directory spec's own
+documented default) so the same registry is used no matter which
+directory norma is launched from. Override it per invocation with
+`--db <PATH>` (a global flag, valid on every subcommand) or globally with
+the `NORMA_DB` environment variable:
 
 ```bash
 norma --db ./team-patterns.db list-patterns

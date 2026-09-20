@@ -62,8 +62,9 @@ singleton-quality-typescript typescript [warning] Singleton Implementation Quali
 strategy-overuse-typescript  typescript [warning] Strategy Overuse (Type Switch)
 ```
 
-The registry lives at `$HOME/.local/share/norma/norma.db`. Point norma
-somewhere else with the global `--db <PATH>` flag or the `NORMA_DB`
+The registry lives at `$XDG_DATA_HOME/norma/norma.db` (or
+`$HOME/.local/share/norma/norma.db` if `$XDG_DATA_HOME` isn't set). Point
+norma somewhere else with the global `--db <PATH>` flag or the `NORMA_DB`
 environment variable.
 
 ## 5. Validate a file

@@ -20,6 +20,7 @@ async fn main() -> anyhow::Result<()> {
     let db_path = cli::resolve_db_path(
         cli.db,
         std::env::var("NORMA_DB").ok(),
+        std::env::var("XDG_DATA_HOME").ok(),
         std::env::var("HOME").ok(),
     );
     if let Some(parent) = db_path.parent() {
