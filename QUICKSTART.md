@@ -35,14 +35,31 @@ below with `cargo run -- ...` (debug build) or
 norma list-patterns
 ```
 
-On first run norma seeds its four MVP patterns — one "no debug print"
-rule each for Java, Python, Rust and TypeScript — and prints them:
+On first run norma seeds its 20 default patterns -- the four MVP "no debug
+print" patterns plus 16 Gang-of-Four patterns (Singleton, Factory,
+Observer, Strategy), one per language -- and prints them:
 
 ```
+factory-overuse-java         java       [warning] Factory Overuse (Type Switch)
 no-debug-print-java          java       [warning] No Debug Print
+observer-presence-java       java       [info] Observer Presence
+singleton-quality-java       java       [warning] Singleton Implementation Quality
+strategy-overuse-java        java       [warning] Strategy Overuse (Type Switch)
+factory-overuse-python       python     [warning] Factory Overuse (Type Switch)
 no-debug-print-python        python     [warning] No Debug Print
+observer-presence-python     python     [info] Observer Presence
+singleton-quality-python     python     [warning] Singleton Implementation Quality
+strategy-overuse-python      python     [warning] Strategy Overuse (Type Switch)
+factory-overuse-rust         rust       [warning] Factory Overuse (Type Switch)
 no-debug-print-rust          rust       [warning] No Debug Print
+observer-presence-rust       rust       [info] Observer Presence
+singleton-quality-rust       rust       [warning] Singleton Implementation Quality
+strategy-overuse-rust        rust       [warning] Strategy Overuse (Type Switch)
+factory-overuse-typescript   typescript [warning] Factory Overuse (Type Switch)
 no-debug-print-typescript    typescript [warning] No Debug Print
+observer-presence-typescript typescript [info] Observer Presence
+singleton-quality-typescript typescript [warning] Singleton Implementation Quality
+strategy-overuse-typescript  typescript [warning] Strategy Overuse (Type Switch)
 ```
 
 The registry lives at `$HOME/.local/share/norma/norma.db`. Point norma
