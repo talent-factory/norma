@@ -325,6 +325,77 @@ rule:
         regex: notify
 "#,
     },
+    DefaultPattern {
+        name: "Strategy Overuse (Type Switch)",
+        description: "Type-switch behavior selection (if/else-if each calling a different method) suggests a Strategy would be a better fit.",
+        category: "behavioral",
+        rule: r#"
+id: strategy-overuse-java
+message: Type-switch behavior selection (if/else-if each calling a different method) suggests a Strategy would be a better fit
+severity: warning
+language: Java
+rule:
+  pattern: |
+    if ($COND1) {
+      $METHOD1($$$ARGS1);
+    } else if ($COND2) {
+      $METHOD2($$$ARGS2);
+    }
+"#,
+    },
+    DefaultPattern {
+        name: "Strategy Overuse (Type Switch)",
+        description: "Type-switch behavior selection (if/elif each calling a different function) suggests a Strategy would be a better fit.",
+        category: "behavioral",
+        rule: r#"
+id: strategy-overuse-python
+message: Type-switch behavior selection (if/elif each calling a different function) suggests a Strategy would be a better fit
+severity: warning
+language: Python
+rule:
+  pattern: |
+    if $COND1:
+        $METHOD1($$$ARGS1)
+    elif $COND2:
+        $METHOD2($$$ARGS2)
+"#,
+    },
+    DefaultPattern {
+        name: "Strategy Overuse (Type Switch)",
+        description: "Type-switch behavior selection (if/else-if each calling a different function) suggests a Strategy would be a better fit.",
+        category: "behavioral",
+        rule: r#"
+id: strategy-overuse-rust
+message: Type-switch behavior selection (if/else-if each calling a different function) suggests a Strategy would be a better fit
+severity: warning
+language: Rust
+rule:
+  pattern: |
+    if $COND1 {
+        $METHOD1($$$ARGS1);
+    } else if $COND2 {
+        $METHOD2($$$ARGS2);
+    }
+"#,
+    },
+    DefaultPattern {
+        name: "Strategy Overuse (Type Switch)",
+        description: "Type-switch behavior selection (if/else-if each calling a different method) suggests a Strategy would be a better fit.",
+        category: "behavioral",
+        rule: r#"
+id: strategy-overuse-typescript
+message: Type-switch behavior selection (if/else-if each calling a different method) suggests a Strategy would be a better fit
+severity: warning
+language: TypeScript
+rule:
+  pattern: |
+    if ($COND1) {
+      $METHOD1($$$ARGS1);
+    } else if ($COND2) {
+      $METHOD2($$$ARGS2);
+    }
+"#,
+    },
 ];
 
 #[cfg(test)]

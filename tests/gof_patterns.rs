@@ -232,3 +232,59 @@ fn observer_presence_matches_do_not_fail_validation() {
     assert!(result.passed);
     assert_eq!(result.score, 1.0);
 }
+
+#[test]
+fn strategy_overuse_java() {
+    assert_matches(
+        "strategy-overuse-java",
+        "java",
+        "class Payment { void pay(String kind) { if (kind.equals(\"card\")) { payByCard(); } else if (kind.equals(\"cash\")) { payByCash(); } } }",
+    );
+    assert_does_not_match(
+        "strategy-overuse-java",
+        "java",
+        "class Payment { void pay(String kind) { if (kind.equals(\"card\")) { payByCard(); } } }",
+    );
+}
+
+#[test]
+fn strategy_overuse_python() {
+    assert_matches(
+        "strategy-overuse-python",
+        "python",
+        "def pay(kind):\n    if kind == 'card':\n        pay_by_card()\n    elif kind == 'cash':\n        pay_by_cash()\n",
+    );
+    assert_does_not_match(
+        "strategy-overuse-python",
+        "python",
+        "def pay(kind):\n    if kind == 'card':\n        pay_by_card()\n",
+    );
+}
+
+#[test]
+fn strategy_overuse_rust() {
+    assert_matches(
+        "strategy-overuse-rust",
+        "rust",
+        "fn pay(kind: &str) { if kind == \"card\" { pay_by_card(); } else if kind == \"cash\" { pay_by_cash(); } }",
+    );
+    assert_does_not_match(
+        "strategy-overuse-rust",
+        "rust",
+        "fn pay(kind: &str) { if kind == \"card\" { pay_by_card(); } }",
+    );
+}
+
+#[test]
+fn strategy_overuse_typescript() {
+    assert_matches(
+        "strategy-overuse-typescript",
+        "typescript",
+        "function pay(kind: string) { if (kind === 'card') { payByCard(); } else if (kind === 'cash') { payByCash(); } }",
+    );
+    assert_does_not_match(
+        "strategy-overuse-typescript",
+        "typescript",
+        "function pay(kind: string) { if (kind === 'card') { payByCard(); } }",
+    );
+}
