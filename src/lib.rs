@@ -6,3 +6,5 @@
 //! Modules are added here one at a time by the tasks in
 //! docs/superpowers/plans/2026-09-20-norma-mvp-implementation.md; each
 //! addition should keep `cargo test --lib` green.
+
+pub mod models;
