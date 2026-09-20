@@ -107,3 +107,59 @@ fn singleton_quality_typescript() {
         "class Config { private static instance: Config; private constructor() {} }",
     );
 }
+
+#[test]
+fn factory_overuse_java() {
+    assert_matches(
+        "factory-overuse-java",
+        "java",
+        "class Foo { void bar(String kind) { if (kind.equals(\"a\")) { new Dog(); } else if (kind.equals(\"b\")) { new Cat(); } } }",
+    );
+    assert_does_not_match(
+        "factory-overuse-java",
+        "java",
+        "class Foo { void bar(String kind) { if (kind.equals(\"a\")) { new Dog(); } } }",
+    );
+}
+
+#[test]
+fn factory_overuse_python() {
+    assert_matches(
+        "factory-overuse-python",
+        "python",
+        "def make(kind):\n    if kind == 'a':\n        Dog()\n    elif kind == 'b':\n        Cat()\n",
+    );
+    assert_does_not_match(
+        "factory-overuse-python",
+        "python",
+        "def make(kind):\n    if kind == 'a':\n        Dog()\n",
+    );
+}
+
+#[test]
+fn factory_overuse_rust() {
+    assert_matches(
+        "factory-overuse-rust",
+        "rust",
+        "fn make(kind: &str) { if kind == \"a\" { Dog {} } else if kind == \"b\" { Cat {} } }",
+    );
+    assert_does_not_match(
+        "factory-overuse-rust",
+        "rust",
+        "fn make(kind: &str) { if kind == \"a\" { Dog {} } }",
+    );
+}
+
+#[test]
+fn factory_overuse_typescript() {
+    assert_matches(
+        "factory-overuse-typescript",
+        "typescript",
+        "function make(kind: string) { if (kind === 'a') { new Dog(); } else if (kind === 'b') { new Cat(); } }",
+    );
+    assert_does_not_match(
+        "factory-overuse-typescript",
+        "typescript",
+        "function make(kind: string) { if (kind === 'a') { new Dog(); } }",
+    );
+}

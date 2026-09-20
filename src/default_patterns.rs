@@ -171,6 +171,77 @@ rule:
             regex: private
 "#,
     },
+    DefaultPattern {
+        name: "Factory Overuse (Type Switch)",
+        description: "Type-switch construction (if/else-if each calling `new`) suggests a Factory would be a better fit.",
+        category: "creational",
+        rule: r#"
+id: factory-overuse-java
+message: Type-switch construction (if/else-if each calling `new`) suggests a Factory would be a better fit
+severity: warning
+language: Java
+rule:
+  pattern: |
+    if ($COND1) {
+      new $TYPE1($$$ARGS1);
+    } else if ($COND2) {
+      new $TYPE2($$$ARGS2);
+    }
+"#,
+    },
+    DefaultPattern {
+        name: "Factory Overuse (Type Switch)",
+        description: "Type-switch construction (if/elif each instantiating a different class) suggests a Factory would be a better fit.",
+        category: "creational",
+        rule: r#"
+id: factory-overuse-python
+message: Type-switch construction (if/elif each instantiating a different class) suggests a Factory would be a better fit
+severity: warning
+language: Python
+rule:
+  pattern: |
+    if $COND1:
+        $TYPE1($$$ARGS1)
+    elif $COND2:
+        $TYPE2($$$ARGS2)
+"#,
+    },
+    DefaultPattern {
+        name: "Factory Overuse (Type Switch)",
+        description: "Type-switch construction (if/else-if each building a different struct literal) suggests a Factory function would be a better fit.",
+        category: "creational",
+        rule: r#"
+id: factory-overuse-rust
+message: Type-switch construction (if/else-if each building a different struct literal) suggests a Factory function would be a better fit
+severity: warning
+language: Rust
+rule:
+  pattern: |
+    if $COND1 {
+        $TYPE1 { $$$FIELDS1 }
+    } else if $COND2 {
+        $TYPE2 { $$$FIELDS2 }
+    }
+"#,
+    },
+    DefaultPattern {
+        name: "Factory Overuse (Type Switch)",
+        description: "Type-switch construction (if/else-if each calling `new`) suggests a Factory would be a better fit.",
+        category: "creational",
+        rule: r#"
+id: factory-overuse-typescript
+message: Type-switch construction (if/else-if each calling `new`) suggests a Factory would be a better fit
+severity: warning
+language: TypeScript
+rule:
+  pattern: |
+    if ($COND1) {
+      new $TYPE1($$$ARGS1);
+    } else if ($COND2) {
+      new $TYPE2($$$ARGS2);
+    }
+"#,
+    },
 ];
 
 #[cfg(test)]
