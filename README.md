@@ -1,131 +1,70 @@
 # norma — Developer-grade code pattern enforcement
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/talent-factory/norma#license)
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 
 **norma** is a Model Context Protocol (MCP) server for validating and enforcing design patterns and coding standards. Built in Rust, it integrates seamlessly with Claude Code and other AI-assisted development tools.
 
 ## 🎯 Features
 
 - ✅ **Pattern Validation** — Check code against registered design patterns
-- ✅ **Multi-Language Support** — Java, TypeScript, Python, Go, and more
+- ✅ **Multi-Language Support** — Java, Python, Rust and TypeScript (an
+  unsupported `--language` is rejected, never silently skipped)
 - ✅ **MCP Integration** — Works with Claude Code, Cursor, and other MCP clients
 - ✅ **Persistent Storage** — SQLite-backed pattern registry
-- ✅ **Real-Time Feedback** — Instant violation detection with suggestions
+- ✅ **Real-Time Feedback** — Instant violation detection with file:line:column locations
 - ✅ **Custom Patterns** — Define team-specific coding standards
 - ✅ **Educational Focus** — Perfect for teaching design patterns
 
-## 🚀 Quick Start
+## Usage
 
-### Prerequisites
-
-- Rust 1.70+ (install via [rustup](https://rustup.rs/))
-- SQLite 3.0+
-
-### Installation
+Build and install once:
 
 ```bash
-git clone https://github.com/talent-factory/norma.git
-cd norma
 cargo build --release
+cargo install --path .
 ```
 
-The binary will be at `target/release/norma`.
-
-### Running the MCP Server
+Run the MCP tool server (for Claude Code / MCP Inspector):
 
 ```bash
-./target/release/norma
+norma serve
 ```
 
-The server listens on stdin/stdout and is ready for MCP client connections.
-
-### Using with Claude Code
-
-1. Add to `.claude/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "norma": {
-      "command": "/path/to/norma"
-    }
-  }
-}
-```
-
-2. Restart Claude Code
-3. Use the norma tools in your prompts:
-
-```
-Validate this Java code against our design patterns
-```
-
-## 📚 Usage
-
-### Validate Code
+Validate one or more files from the command line (files are positional,
+so shell globs and `pre-commit`'s staged-file list both work):
 
 ```bash
-# In Claude Code or via MCP client
-tool: validate_pattern_compliance
-code: "public class Singleton { ... }"
-language: "java"
+norma validate --language rust src/main.rs
+norma validate --language rust --json src/*.rs
 ```
 
-**Response:**
-```json
-{
-  "violations": [
-    {
-      "pattern_name": "Singleton Pattern",
-      "severity": "warning",
-      "location": { "file": "code", "line": 1, "column": 0 },
-      "message": "Missing synchronized keyword on getInstance()",
-      "suggestion": "Add synchronized to getInstance() method"
-    }
-  ],
-  "passed": false,
-  "score": 0.7,
-  "duration_ms": 42
-}
-```
+Exit status is non-zero if *any* file has violations.
 
-### Get Pattern Checklist
+List every registered pattern:
 
 ```bash
-tool: get_pattern_checklist
-language: "java"
+norma list-patterns
 ```
 
-**Response:**
-```json
-[
-  {
-    "id": "java-singleton",
-    "name": "Singleton Pattern",
-    "description": "Ensure proper Singleton implementation",
-    "severity": "warning",
-    "enabled": true
-  },
-  {
-    "id": "java-factory",
-    "name": "Factory Pattern",
-    "description": "Use Factory pattern for object creation",
-    "severity": "info",
-    "enabled": true
-  }
-]
-```
+### Where the pattern database lives
 
-### Register Custom Pattern
+norma stores its pattern registry in SQLite at a fixed per-user location
+(`$HOME/.local/share/norma/norma.db`) so the same registry is used no
+matter which directory norma is launched from. Override it per invocation
+with `--db <PATH>` (a global flag, valid on every subcommand) or globally
+with the `NORMA_DB` environment variable:
 
 ```bash
-tool: register_pattern
-name: "My Custom Pattern"
-description: "Check for X in code"
-rule: "regex pattern or AST-grep rule"
-languages: ["java", "typescript"]
-severity: "warning"
+norma --db ./team-patterns.db list-patterns
+NORMA_DB=/srv/norma/patterns.db norma serve
+```
+
+Enable the pre-commit hook (see `.pre-commit-config.yaml` -- requires
+`norma` already installed via `cargo install --path .`):
+
+```bash
+pre-commit install
 ```
 
 ## 🏗️ Architecture
@@ -133,34 +72,41 @@ severity: "warning"
 ```
 norma/
 ├── src/
-│   ├── main.rs              # Entry point & transport setup
+│   ├── main.rs              # Entry point: wires the CLI to the shared core
 │   ├── lib.rs               # Library exports
-│   ├── models.rs            # Data structures (Pattern, Violation, etc.)
+│   ├── cli.rs                # clap Cli/Command, validate_files, resolve_db_path
+│   ├── models.rs            # Data structures (Pattern, PatternViolation, etc.)
 │   ├── mcp_server.rs        # MCP tool definitions & handlers
 │   ├── pattern_engine.rs    # Pattern matching & validation logic
-│   └── pattern_store.rs     # SQLite persistence layer
+│   ├── pattern_store.rs     # SQLite persistence layer
+│   └── default_patterns.rs # The four MVP "no debug print" patterns
+├── tests/
+│   └── dogfooding.rs        # norma validates its own src/ with its own Rust pattern
+├── docs/adr/                # Architecture decision records
 ├── Cargo.toml               # Rust dependencies
 └── README.md
 ```
 
 ## 📋 Pattern Definition Format
 
-Patterns are stored as JSON-serialized `Pattern` structs with:
+A `Pattern` is single-language (see [ADR 0002](docs/adr/0002-pattern-single-language-full-rule-config.md)): an idea that should hold across several languages -- like "no debug prints" -- becomes several `Pattern` rows, one per language, linked only by a shared `name`. `id`, `language`, and `severity` are never set directly; they're derived from `rule`, which holds the *complete* ast-grep `RuleConfig` YAML document:
 
 ```json
 {
-  "id": "java-singleton",
-  "name": "Singleton Pattern",
-  "description": "Ensure proper Singleton implementation",
-  "rule": "regex pattern",
-  "rewrite": "suggested fix",
+  "id": "no-debug-print-java",
+  "name": "No Debug Print",
+  "description": "System.out.println left in production code should go through a proper logger instead.",
+  "category": "code-quality",
+  "language": "java",
   "severity": "warning",
-  "languages": ["java"],
+  "rule": "id: no-debug-print-java\nmessage: Avoid System.out.println in production code\nseverity: warning\nlanguage: Java\nrule:\n  pattern: System.out.println($$$ARGS)\n",
   "enabled": true,
-  "created_at": "2025-09-19T...",
-  "updated_at": "2025-09-19T..."
+  "created_at": "2026-09-20T...",
+  "updated_at": "2026-09-20T..."
 }
 ```
+
+Register one via the `register_pattern` MCP tool, or in Rust via `PatternStore::register_pattern(name, description, category, rule_yaml)` -- see `src/default_patterns.rs` for the four patterns norma ships with.
 
 ## 🔧 Development
 
@@ -197,24 +143,25 @@ norma is designed to help you:
 3. **Understand AST-Based Analysis** — See how pattern matching works
 4. **Integrate with Claude Code** — Use AI to help you follow patterns
 
-### Example: Java Factory Pattern
+### Example: catching `System.out.println` in Java
 
-Define a pattern to check that object creation uses factories:
+This is one of the four patterns norma ships with (`src/default_patterns.rs`).
+The rule is a full ast-grep `RuleConfig` YAML document:
 
-```rust
-Pattern::new(
-    "java-factory-pattern".to_string(),
-    "Require Factory pattern for object creation".to_string(),
-    r"new\s+\w+\(".to_string(),  // Simplified; use AST in production
-    vec!["java".to_string()],
-)
+```yaml
+id: no-debug-print-java
+message: Avoid System.out.println in production code
+severity: warning
+language: Java
+rule:
+  pattern: System.out.println($$$ARGS)
 ```
 
 Then validate:
 
 ```
 validate_pattern_compliance(
-    code: "MyObject obj = factory.create();",  // ✓ PASS
+    code: "System.out.println(\"debug\");",  // ✗ flagged
     language: "java"
 )
 ```

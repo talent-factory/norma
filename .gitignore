@@ -5,6 +5,7 @@
 /.claude/
 /.headroom/
 /.serena/
+/.superpowers/
 
 # SQLite runtime databases (created on first run, not source)
 *.db

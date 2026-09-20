@@ -4,87 +4,29 @@ This document outlines the current state of the norma project and the next steps
 
 ## 📊 Current Status
 
-### ✅ Completed
+### ✅ Completed (MVP -- see `docs/superpowers/plans/2026-09-20-norma-mvp-implementation.md`)
 
-- [x] Project scaffolding and structure
-- [x] Core data models (Pattern, Violation, ValidationResult)
-- [x] MCP server definition with mcpkit
-- [x] Pattern storage with SQLite
-- [x] Basic pattern engine (regex-based)
-- [x] Default patterns (Java, TypeScript)
-- [x] README and documentation
-- [x] License setup (MIT/Apache-2.0)
+- [x] MCP server on `rmcp`, the official Rust MCP SDK -- replaces the original `mcpkit` scaffold, which never built (see docs/adr/0001.md and `.scratch/norma-architecture/issues/01-mcpkit-vs-alternative.md`)
+- [x] Real AST-based pattern matching via `ast-grep-core` (`ast-grep-core`/`-config`/`-language`, version-pinned exactly to `0.45.3` since the Rust API is "not stable yet") -- no regex matching remains
+- [x] Single binary, `clap` subcommands (`norma serve`, `norma validate --file --language [--json]`, `norma list-patterns`) sharing one async core with the MCP server -- `src/cli.rs`, `src/main.rs`, per docs/adr/0001.md
+- [x] SQLite-backed `PatternStore` following the ADR 0002 schema: one row per language (no join table), `rule` stores the full ast-grep `RuleConfig` YAML verbatim, `language`/`severity` always derived by parsing that YAML rather than accepted as separate fields, fail-fast validation in `register_pattern` (nothing is written if the YAML doesn't parse) -- `src/pattern_store.rs`, docs/adr/0002.md
+- [x] Four default patterns, one per MVP language (Java, Python, Rust, TypeScript), all expressing the same "no debug print in production code" idea under category `code-quality` -- `src/default_patterns.rs`
+- [x] Dogfooding integration test: the Rust "no debug print" default pattern run against norma's own `src/`, skipping `main.rs` (its `println!` calls are legitimate CLI output, not a debug leftover) -- `tests/dogfooding.rs`
+- [x] Pre-commit hook template (`.pre-commit-config.yaml`), `language: system` so pre-commit calls the already-installed `norma` binary instead of compiling Rust on every run
+- [x] README and DEVELOPMENT docs brought in line with the above
 
-### 🔄 In Progress / Next Steps
+### 🔄 Next Steps
 
-1. **AST-Grep Integration** (Priority: High)
-   - Replace regex-based matching with real AST analysis
-   - Integrate ast-grep-core for multi-language support
-   - Create AST patterns for Java factory pattern detection
-   - Location: `src/pattern_engine.rs`
+1. **Test strategy** (Priority: Medium)
+   - The wayfinder map (`.scratch/norma-architecture/map.md`, section "Not yet specified") deliberately left the overall unit/integration/E2E test strategy unresolved for the spec phase -- it didn't block implementation, and each task supplied its own tests as it went (unit tests next to `pattern_engine`, `pattern_store`, `cli`, `default_patterns`, plus the `tests/dogfooding.rs` integration test). Revisit explicitly if a real gap shows up, e.g. dedicated end-to-end MCP-protocol coverage.
 
-2. **Pre-Commit Hook Integration** (Priority: High)
-   - Add CLI validation subcommand
-   - Create `.pre-commit-config.yaml` template
-   - Test with real Git workflow
-   - Location: `src/main.rs`
+2. **v2 pattern set, including GoF patterns** (Priority: Medium)
+   - The MVP deliberately shipped one pattern per language and deferred classic Gang-of-Four checks (Singleton, Factory, Observer, Strategy, ...) -- see the "MVP-Pattern-Set-Scope" ticket (`.scratch/norma-architecture/issues/05-mvp-pattern-set-scope.md`). A v2 set should add these, each verified against real `ast-grep-core` the same way the v1 defaults were.
+   - Location: `src/default_patterns.rs`
 
-3. **Test Suite Expansion** (Priority: Medium)
-   - Unit tests for pattern matching
-   - Integration tests for SQLite operations
-   - E2E tests for MCP protocol
-   - Location: `tests/` directory
-
-4. **Documentation** (Priority: Medium)
-   - API documentation (cargo doc)
-   - Tutorial: "Your First Pattern"
-   - Integration guide for Claude Code
-   - Location: various
-
-5. **Performance Optimization** (Priority: Low)
-   - Benchmark pattern matching
-   - Cache compiled patterns
-   - Connection pooling tuning
+3. **Performance optimization** (Priority: Low)
+   - Benchmark pattern matching, cache compiled ast-grep rules, tune the SQLite connection pool.
    - Location: `src/pattern_engine.rs`, `src/pattern_store.rs`
-
-## 🎯 Quick Tasks for Claude Code
-
-### Immediate (Session 1-2)
-
-- [ ] Build and test the project
-  ```bash
-  cargo build
-  cargo test
-  ```
-
-- [ ] Implement AST-grep integration in `pattern_engine.rs`
-  - Use `ast-grep-core` crate for real pattern matching
-  - Test with a Java factory pattern example
-
-- [ ] Add more default patterns
-  - Singleton pattern (Java)
-  - Observer pattern (TypeScript)
-  - Strategy pattern (Python)
-
-### Short-term (Session 3-4)
-
-- [ ] Implement CLI for validation
-  - `norma validate --file src/Main.java --lang java`
-  - `norma check-patterns`
-
-- [ ] Add pre-commit hook support
-  - Generate `.pre-commit-config.yaml`
-  - Test integration with real Git repo
-
-- [ ] Improve error messages
-  - Better violation descriptions
-  - Actionable suggestions
-
-### Medium-term (Week 2+)
-
-- [ ] Build web UI for pattern management (optional)
-- [ ] Create pattern marketplace (optional)
-- [ ] Publish crate to crates.io (optional)
 
 ## 🛠️ Development Environment
 
@@ -120,26 +62,30 @@ cargo build --release
 
 ## 📝 Pattern Definition Examples
 
-### Java Singleton
+See `src/default_patterns.rs` for the four patterns norma ships with (one
+per MVP language, all expressing "no debug print"), and the README's
+[Pattern Definition Format](README.md#pattern-definition-format) section
+for the shape a `rule` YAML document needs. There is no `Pattern::new`
+constructor -- `Pattern::from_rule` (`src/pattern_engine.rs`) is the only
+way to build one, and it derives `id`/`language`/`severity` from the YAML
+rather than accepting them separately (see docs/adr/0002.md).
 
-```rust
-Pattern::new(
-    "java-singleton".to_string(),
-    "Enforce proper Singleton pattern implementation".to_string(),
-    r"class\s+\w+\s*\{[^}]*private\s+static\s+\w+\s+instance[^}]*public\s+static\s+synchronized".to_string(),
-    vec!["java".to_string()],
-)
-```
+A v2 GoF pattern (see "Next Steps" above) would look like this for Java
+Singleton -- a `kind`/`has` rule rather than a plain string pattern, since
+it needs to express a structural relationship (a private static field
+*inside* the class), not just a code shape:
 
-### TypeScript Factory
-
-```rust
-Pattern::new(
-    "ts-factory-pattern".to_string(),
-    "Use Factory pattern for object creation".to_string(),
-    r"new\s+\w+\(".to_string(),  // Simplified; improve with AST
-    vec!["typescript".to_string(), "javascript".to_string()],
-)
+```yaml
+id: java-singleton
+message: Enforce proper Singleton pattern implementation
+severity: warning
+language: Java
+rule:
+  kind: class_declaration
+  has:
+    kind: field_declaration
+    # ... the actual field/method shape is still to be worked out
+    # against real ast-grep-core, the same way the v1 defaults were.
 ```
 
 ## 🔍 Testing Checklist
@@ -178,5 +124,5 @@ When working in Claude Code, reference:
 
 ---
 
-**Last updated:** 2025-09-19
+**Last updated:** 2026-09-20
 **Maintainer:** Talent Factory GmbH
