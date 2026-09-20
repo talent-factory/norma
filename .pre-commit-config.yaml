@@ -10,6 +10,12 @@ repos:
         entry: norma validate --language rust --json
         language: system
         files: \.rs$
+        # norma's own repo carries two files with intentional println!s that
+        # the "no debug print" pattern would otherwise flag: main.rs (the
+        # CLI's actual stdout output, see tests/dogfooding.rs) and the
+        # wayfinder probe script (throwaway verification code, not shipped
+        # source). Excluded so this hook can pass against norma's own tree.
+        exclude: '^(\.scratch/|src/main\.rs$)'
         # pre-commit appends every staged file to `entry`; `norma validate`
         # takes those as positional arguments. Serial, because concurrent
         # invocations would open the same SQLite database at once.
