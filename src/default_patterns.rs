@@ -68,6 +68,109 @@ rule:
   pattern: console.log($$$ARGS)
 "#,
     },
+    DefaultPattern {
+        name: "Singleton Implementation Quality",
+        description: "Class looks like a Singleton (private static instance field) but its constructor is not private, so callers can bypass the single-instance guarantee.",
+        category: "creational",
+        rule: r#"
+id: singleton-quality-java
+message: Class looks like a Singleton (private static instance field) but its constructor is not private
+severity: warning
+language: Java
+rule:
+  kind: class_declaration
+  all:
+    - has:
+        stopBy: end
+        kind: field_declaration
+        pattern:
+          context: 'class C { private static $TYPE instance; }'
+          selector: field_declaration
+    - has:
+        stopBy: end
+        kind: constructor_declaration
+        not:
+          has:
+            kind: modifiers
+            regex: private
+"#,
+    },
+    DefaultPattern {
+        name: "Singleton Implementation Quality",
+        description: "Class has a Singleton-style `_instance` attribute but no `__new__` guard enforcing a single instance.",
+        category: "creational",
+        rule: r#"
+id: singleton-quality-python
+message: Class has a Singleton-style `_instance` attribute but no `__new__` guard enforcing a single instance
+severity: warning
+language: Python
+rule:
+  kind: class_definition
+  all:
+    - has:
+        stopBy: end
+        kind: assignment
+        pattern: _instance = None
+    - not:
+        has:
+          stopBy: end
+          kind: function_definition
+          has:
+            field: name
+            regex: '^__new__$'
+"#,
+    },
+    DefaultPattern {
+        name: "Singleton Implementation Quality",
+        description: "A public `new()` next to a module-level `static INSTANCE` defeats the Singleton -- callers can construct extra instances directly.",
+        category: "creational",
+        rule: r#"
+id: singleton-quality-rust
+message: A public `new()` next to a module-level `static INSTANCE` defeats the Singleton -- callers can construct extra instances directly
+severity: warning
+language: Rust
+rule:
+  kind: source_file
+  all:
+    - has:
+        stopBy: end
+        kind: static_item
+        pattern: static INSTANCE $$$REST
+    - has:
+        stopBy: end
+        kind: function_item
+        pattern: pub fn new($$$PARAMS) -> $$$RET { $$$BODY }
+"#,
+    },
+    DefaultPattern {
+        name: "Singleton Implementation Quality",
+        description: "Class looks like a Singleton (private static instance field) but its constructor is not private, so callers can bypass the single-instance guarantee.",
+        category: "creational",
+        rule: r#"
+id: singleton-quality-typescript
+message: Class looks like a Singleton (private static instance field) but its constructor is not private
+severity: warning
+language: TypeScript
+rule:
+  kind: class_declaration
+  all:
+    - has:
+        stopBy: end
+        kind: public_field_definition
+        pattern:
+          context: 'class C { private static instance: $TYPE; }'
+          selector: public_field_definition
+    - has:
+        stopBy: end
+        kind: method_definition
+        pattern:
+          context: 'class C { constructor() {} }'
+          selector: method_definition
+        not:
+          has:
+            regex: private
+"#,
+    },
 ];
 
 #[cfg(test)]
