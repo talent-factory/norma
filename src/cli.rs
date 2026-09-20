@@ -356,7 +356,7 @@ rule:
     /// see `render_human_readable`'s doc comment.
     #[test]
     fn render_human_readable_splits_blocking_from_informational_counts() {
-        use crate::models::{CodeLocation, PatternViolation, Severity, ValidationResult};
+        use crate::models::{CodeLocation, PatternViolation};
 
         let location = CodeLocation {
             file: None,

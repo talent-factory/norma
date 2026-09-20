@@ -74,7 +74,8 @@ echo "exit code: $?"
 ```
 
 Expected: one violation line pointing at the `println!` call, a summary
-line (`1 violation(s), score 0.00, ...`), and **exit code 1**.
+line (`1 violation(s) (0 informational), score 0.80, 5 pattern(s) checked
+(... ms)`), and **exit code 1**.
 
 ## 5. CLI: `validate` reports a clean pass
 

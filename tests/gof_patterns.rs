@@ -108,7 +108,22 @@ fn singleton_quality_rust() {
     assert_does_not_match(
         "singleton-quality-rust",
         "rust",
+        "static INSTANCE: OnceLock<Config> = OnceLock::new();\nstruct Config;\nstruct Unrelated;\nimpl Unrelated { pub fn new() -> Unrelated { Unrelated } }",
+    );
+    assert_does_not_match(
+        "singleton-quality-rust",
+        "rust",
         "struct Config;\nimpl Config { pub fn new() -> Config { Config } }",
+    );
+    assert_matches(
+        "singleton-quality-rust",
+        "rust",
+        "static INSTANCE: OnceLock<Config> = OnceLock::new();\nstruct Config;\nimpl Config { pub fn new() -> Self { Self } }",
+    );
+    assert_matches(
+        "singleton-quality-rust",
+        "rust",
+        "static INSTANCE: Config = Config;\nstruct Config;\nimpl Config { pub fn new() -> Config { Config } }",
     );
 }
 

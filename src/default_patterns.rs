@@ -75,11 +75,11 @@ rule:
     },
     DefaultPattern {
         name: "Singleton Implementation Quality",
-        description: "Class looks like a Singleton (private static instance field) but its constructor is not private, so callers can bypass the single-instance guarantee.",
+        description: "Class looks like a Singleton (private static instance field) but its constructor is not private (or is left implicit), so callers can bypass the single-instance guarantee.",
         category: "creational",
         rule: r#"
 id: singleton-quality-java
-message: Class looks like a Singleton (private static instance field) but its constructor is not private
+message: Class looks like a Singleton (private static instance field) but its constructor is not private (or is left implicit)
 severity: warning
 language: Java
 rule:
@@ -132,7 +132,7 @@ rule:
     },
     DefaultPattern {
         name: "Singleton Implementation Quality",
-        description: "A public `new()` next to a module-level `static INSTANCE` defeats the Singleton -- callers can construct extra instances directly.",
+        description: "A public `new()` next to a module-level `static INSTANCE` of the same type defeats the Singleton -- callers can construct extra instances directly.",
         category: "creational",
         rule: r#"
 id: singleton-quality-rust
@@ -148,23 +148,27 @@ rule:
     - has:
         stopBy: end
         kind: function_item
-        pattern: pub fn new($$$PARAMS) -> $TYPE { $$$BODY }
+        pattern: pub fn new($$$PARAMS) -> $$$RET { $$$BODY }
     - inside:
         stopBy: end
         kind: source_file
         has:
           stopBy: end
           kind: static_item
-          pattern: 'static INSTANCE: $WRAPPER<$TYPE> = $$$INIT;'
+          any:
+            - pattern: 'static INSTANCE: $WRAPPER<$TYPE> = $$$INIT;'
+            - pattern: 'static INSTANCE: $TYPE = $$$INIT;'
+            - pattern: 'static mut INSTANCE: $WRAPPER<$TYPE> = $$$INIT;'
+            - pattern: 'static mut INSTANCE: $TYPE = $$$INIT;'
 "#,
     },
     DefaultPattern {
         name: "Singleton Implementation Quality",
-        description: "Class looks like a Singleton (private static instance field) but its constructor is not private, so callers can bypass the single-instance guarantee.",
+        description: "Class looks like a Singleton (private static instance field) but its constructor is not private (or is left implicit), so callers can bypass the single-instance guarantee.",
         category: "creational",
         rule: r#"
 id: singleton-quality-typescript
-message: Class looks like a Singleton (private static instance field) but its constructor is not private
+message: Class looks like a Singleton (private static instance field) but its constructor is not private (or is left implicit)
 severity: warning
 language: TypeScript
 rule:
