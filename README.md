@@ -81,7 +81,8 @@ norma/
 │   ├── pattern_store.rs     # SQLite persistence layer
 │   └── default_patterns.rs # 20 default patterns: 4 MVP "no debug print" + 16 GoF
 ├── tests/
-│   └── dogfooding.rs        # norma validates its own src/ with its own Rust pattern
+│   ├── dogfooding.rs        # norma validates its own src/ with its own Rust pattern
+│   └── gof_patterns.rs      # Behavioral tests for the GoF v2 pattern set
 ├── docs/adr/                # Architecture decision records
 ├── Cargo.toml               # Rust dependencies
 └── README.md
