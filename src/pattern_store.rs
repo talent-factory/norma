@@ -1,11 +1,35 @@
 use crate::models::{Pattern, Severity};
-use crate::pattern_engine::{language_key, parse_rule};
-use anyhow::{bail, Result};
-use ast_grep_config::Severity as AstGrepSeverity;
+use anyhow::Result;
 use chrono::Utc;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions, SqliteRow};
 use sqlx::Row;
 use std::path::Path;
+
+/// Why `PatternStore::register_pattern` failed. Distinguishes a
+/// client-caused problem (bad YAML, empty `id`, unsupported language --
+/// see `Pattern::from_rule`) from a storage failure (SQLite I/O), so a
+/// caller like the MCP server's `register_pattern` tool can map each to
+/// the right kind of error instead of reporting every failure as "your
+/// input was wrong" -- which is exactly wrong for a disk-full or
+/// corrupted-database condition, and would send an MCP client (often an
+/// LLM agent) off retrying with cosmetic input tweaks that could never fix
+/// the real problem.
+#[derive(Debug)]
+pub enum RegisterPatternError {
+    InvalidRule(anyhow::Error),
+    Storage(anyhow::Error),
+}
+
+impl std::fmt::Display for RegisterPatternError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegisterPatternError::InvalidRule(e) => write!(f, "{e}"),
+            RegisterPatternError::Storage(e) => write!(f, "storage error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for RegisterPatternError {}
 
 /// SQLite-backed registry of `Pattern`s. See docs/adr/0002.md for the
 /// schema rationale: one row per language, `rule` holds the full
@@ -56,42 +80,24 @@ impl PatternStore {
 
     /// Registers a pattern. Fails fast if `rule_yaml` is not a valid
     /// ast-grep RuleConfig -- nothing is written to SQLite in that case.
-    /// `id`, `language` and `severity` are derived from the parsed YAML,
-    /// never accepted as separate inputs, so they cannot drift from it.
-    /// A rule for a language norma does not support is rejected the same
-    /// way -- storing it would produce a row no lookup could ever reach.
+    /// `id`, `language` and `severity` are derived from the parsed YAML by
+    /// `Pattern::from_rule`, never accepted as separate inputs, so they
+    /// cannot drift from it. A rule for a language norma does not support
+    /// is rejected the same way -- storing it would produce a row no
+    /// lookup could ever reach.
     pub async fn register_pattern(
         &self,
         name: String,
         description: String,
         category: Option<String>,
         rule_yaml: String,
-    ) -> Result<Pattern> {
-        let config = parse_rule(&rule_yaml)?;
-        if config.id.is_empty() {
-            bail!("rule YAML must set a non-empty top-level `id`");
-        }
-        let Some(language) = language_key(config.language) else {
-            bail!(
-                "unsupported language: {:?} (norma supports: {})",
-                config.language,
-                crate::pattern_engine::SUPPORTED_LANGUAGES.join(", ")
-            );
-        };
+    ) -> std::result::Result<Pattern, RegisterPatternError> {
         let now = Utc::now();
-        let pattern = Pattern {
-            id: config.id.clone(),
-            name,
-            description,
-            category,
-            language: language.to_string(),
-            severity: severity_from_ast_grep(&config.severity),
-            rule: rule_yaml,
-            enabled: true,
-            created_at: now,
-            updated_at: now,
-        };
-        self.save_pattern(pattern).await
+        let pattern = Pattern::from_rule(name, description, category, rule_yaml, true, now, now)
+            .map_err(RegisterPatternError::InvalidRule)?;
+        self.save_pattern(pattern)
+            .await
+            .map_err(RegisterPatternError::Storage)
     }
 
     async fn save_pattern(&self, pattern: Pattern) -> Result<Pattern> {
@@ -111,13 +117,13 @@ impl PatternStore {
                 updated_at = excluded.updated_at
             "#,
         )
-        .bind(&pattern.id)
+        .bind(pattern.id())
         .bind(&pattern.name)
         .bind(&pattern.description)
         .bind(&pattern.category)
-        .bind(&pattern.language)
-        .bind(pattern.severity.as_str())
-        .bind(&pattern.rule)
+        .bind(pattern.language())
+        .bind(pattern.severity().as_str())
+        .bind(pattern.rule())
         .bind(pattern.enabled)
         .bind(pattern.created_at.to_rfc3339())
         .bind(pattern.updated_at.to_rfc3339())
@@ -169,33 +175,28 @@ impl PatternStore {
     }
 }
 
+/// Reconstructs a `Pattern` from a stored row without re-parsing `rule` --
+/// see `Pattern::from_trusted_row`. Trusts that `id`/`language`/`severity`
+/// still agree with `rule`, which holds as long as every row was written
+/// by `save_pattern` (i.e. every row ever went through `Pattern::from_rule`
+/// first).
 fn row_to_pattern(row: &SqliteRow) -> Result<Pattern> {
     let severity_str: String = row.get("severity");
     let created_at_str: String = row.get("created_at");
     let updated_at_str: String = row.get("updated_at");
-    Ok(Pattern {
-        id: row.get("id"),
-        name: row.get("name"),
-        description: row.get("description"),
-        category: row.get("category"),
-        language: row.get("language"),
-        severity: Severity::parse(&severity_str)
+    Ok(Pattern::from_trusted_row(
+        row.get("id"),
+        row.get("name"),
+        row.get("description"),
+        row.get("category"),
+        row.get("language"),
+        Severity::parse(&severity_str)
             .ok_or_else(|| anyhow::anyhow!("unknown severity in database: {severity_str}"))?,
-        rule: row.get("rule"),
-        enabled: row.get("enabled"),
-        created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str)?.with_timezone(&Utc),
-        updated_at: chrono::DateTime::parse_from_rfc3339(&updated_at_str)?.with_timezone(&Utc),
-    })
-}
-
-fn severity_from_ast_grep(severity: &AstGrepSeverity) -> Severity {
-    match severity {
-        AstGrepSeverity::Off => Severity::Off,
-        AstGrepSeverity::Hint => Severity::Hint,
-        AstGrepSeverity::Info => Severity::Info,
-        AstGrepSeverity::Warning => Severity::Warning,
-        AstGrepSeverity::Error => Severity::Error,
-    }
+        row.get("rule"),
+        row.get("enabled"),
+        chrono::DateTime::parse_from_rfc3339(&created_at_str)?.with_timezone(&Utc),
+        chrono::DateTime::parse_from_rfc3339(&updated_at_str)?.with_timezone(&Utc),
+    ))
 }
 
 #[cfg(test)]
@@ -232,9 +233,9 @@ rule:
             )
             .await
             .unwrap();
-        assert_eq!(pattern.id, "no-debug-print-rust");
-        assert_eq!(pattern.language, "rust");
-        assert_eq!(pattern.severity, Severity::Warning);
+        assert_eq!(pattern.id(), "no-debug-print-rust");
+        assert_eq!(pattern.language(), "rust");
+        assert_eq!(pattern.severity(), Severity::Warning);
     }
 
     #[tokio::test]

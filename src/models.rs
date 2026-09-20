@@ -3,11 +3,11 @@ use serde::{Deserialize, Serialize};
 
 /// Severity level for a pattern violation.
 ///
-/// Mirrors `ast_grep_config::rule_config::Severity` (see docs/adr/0002.md
-/// and `pattern_engine::parse_rule`): norma derives this from the parsed
-/// rule YAML at register time rather than accepting it as a separate
-/// input, so a `Pattern`'s severity can never drift from the YAML that
-/// actually produced it.
+/// Mirrors `ast_grep_config::Severity` (see docs/adr/0002.md and
+/// `pattern_engine::parse_rule`): norma derives this from the parsed rule
+/// YAML at register time rather than accepting it as a separate input, so
+/// a `Pattern`'s severity can never drift from the YAML that actually
+/// produced it.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
@@ -49,10 +49,23 @@ impl Severity {
 /// should hold across several languages (e.g. "no debug prints") becomes
 /// several `Pattern` rows, one per language, related only by a shared
 /// `name` -- there is no data-level link between them.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+///
+/// `id`, `language`, and `severity` are `pub(crate)` rather than `pub`,
+/// and there is no public struct-literal constructor: the only way to
+/// build one is [`Pattern::from_rule`], which derives all three from
+/// `rule` and cannot be called with mismatched values. Without this, the
+/// ADR 0002 invariant ("these three always match what parsing `rule`
+/// produces") was only convention enforced by one caller
+/// (`PatternStore::register_pattern`) -- nothing stopped a different call
+/// site from building an inconsistent `Pattern` by hand. See
+/// [`Pattern::from_trusted_row`] for the one sanctioned way to skip
+/// re-deriving them (reading a row `PatternStore` already validated at
+/// write time).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(test, derive(Deserialize))]
 pub struct Pattern {
     /// The ast-grep RuleConfig `id` from the YAML in `rule`, e.g. `"no-debug-print-rust"`.
-    pub id: String,
+    id: String,
     /// norma's catalog name. Repeats across the language variants of one idea.
     pub name: String,
     /// norma's own, longer explanation (ast-grep's own `message` field
@@ -61,14 +74,69 @@ pub struct Pattern {
     /// Free-text grouping, e.g. `"code-quality"`, `"creational"`. Not a fixed enum.
     pub category: Option<String>,
     /// norma's canonical language key: `"java"` | `"python"` | `"rust"` | `"typescript"`.
-    pub language: String,
+    language: String,
     /// Derived from the parsed `rule` YAML when the pattern was registered.
-    pub severity: Severity,
+    severity: Severity,
     /// The full ast-grep RuleConfig YAML document (id/message/severity/language/rule/fix).
-    pub rule: String,
+    rule: String,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl Pattern {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn language(&self) -> &str {
+        &self.language
+    }
+
+    pub fn severity(&self) -> Severity {
+        self.severity
+    }
+
+    pub fn rule(&self) -> &str {
+        &self.rule
+    }
+
+    /// Reconstructs a `Pattern` from a SQLite row `PatternStore` already
+    /// wrote via [`Pattern::from_rule`] (see `pattern_store::row_to_pattern`).
+    /// Skips re-parsing `rule` for performance, trusting that `id`,
+    /// `language`, and `severity` still agree with it -- named distinctly
+    /// from `from_rule` so it's visually obvious, at the one call site
+    /// that uses it, that this path does not re-derive anything.
+    ///
+    /// One argument per `patterns` column by design (this exists to
+    /// reconstruct exactly that row); a params struct would only move the
+    /// verbosity to its one construction site instead of removing it.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_trusted_row(
+        id: String,
+        name: String,
+        description: String,
+        category: Option<String>,
+        language: String,
+        severity: Severity,
+        rule: String,
+        enabled: bool,
+        created_at: DateTime<Utc>,
+        updated_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            description,
+            category,
+            language,
+            severity,
+            rule,
+            enabled,
+            created_at,
+            updated_at,
+        }
+    }
 }
 
 /// A single match of a `Pattern` against a piece of code.
@@ -92,12 +160,26 @@ pub struct CodeLocation {
 }
 
 /// The result of validating one piece of code against a set of patterns.
+///
+/// `checked_patterns` exists so "clean" and "nothing was checked" are never
+/// indistinguishable: without it, a request for a language with zero
+/// enabled patterns (or one whose only patterns all failed to parse) would
+/// produce the exact same `passed: true, violations: []` as a genuinely
+/// clean result. `pattern_engine::validate` also pushes a synthetic,
+/// `Warning`-severity entry into `violations` in that case, so the
+/// degraded coverage is visible in ordinary output too, not just in a
+/// field a caller has to know to check.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ValidationResult {
     pub violations: Vec<PatternViolation>,
     pub passed: bool,
     /// 1.0 = no violations relative to the number of patterns checked, 0.0 = worst case.
+    /// Always 0.0 when `checked_patterns == 0` -- there is nothing to be
+    /// confidently clean about.
     pub score: f64,
+    /// How many patterns were actually parsed and run. Excludes patterns
+    /// that were skipped because their stored `rule` no longer parses.
+    pub checked_patterns: usize,
     pub duration_ms: u128,
 }
 
