@@ -10,3 +10,4 @@
 pub mod models;
 pub mod pattern_engine;
 pub mod pattern_store;
+pub mod default_patterns;

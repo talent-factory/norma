@@ -134,6 +134,24 @@ impl PatternStore {
         .await?;
         rows.iter().map(row_to_pattern).collect()
     }
+
+    /// Registers norma's default pattern set the first time the store is
+    /// empty. Safe to call on every startup.
+    pub async fn seed_defaults(&self) -> Result<()> {
+        if !self.list_all_patterns().await?.is_empty() {
+            return Ok(());
+        }
+        for def in crate::default_patterns::ALL {
+            self.register_pattern(
+                def.name.to_string(),
+                def.description.to_string(),
+                Some(def.category.to_string()),
+                def.rule.to_string(),
+            )
+            .await?;
+        }
+        Ok(())
+    }
 }
 
 fn row_to_pattern(row: &SqliteRow) -> Result<Pattern> {
@@ -250,5 +268,15 @@ rule:
         let all = store.list_all_patterns().await.unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].name, "v2");
+    }
+
+    #[tokio::test]
+    async fn seed_defaults_loads_exactly_the_four_mvp_patterns_once() {
+        let store = test_store().await;
+        store.seed_defaults().await.unwrap();
+        assert_eq!(store.list_all_patterns().await.unwrap().len(), 4);
+        // Calling it again must not duplicate or error.
+        store.seed_defaults().await.unwrap();
+        assert_eq!(store.list_all_patterns().await.unwrap().len(), 4);
     }
 }
