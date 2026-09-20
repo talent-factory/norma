@@ -1,9 +1,9 @@
 use crate::models::ValidationResult;
 use crate::pattern_engine;
-use crate::pattern_store::PatternStore;
+use crate::pattern_store::{PatternStore, RegisterPatternError};
 use rmcp::{
-    handler::server::wrapper::Parameters, tool, tool_router, transport::stdio, ErrorData,
-    ServiceExt,
+    handler::server::wrapper::Parameters, tool, tool_handler, tool_router, transport::stdio,
+    ErrorData, ServerHandler, ServiceExt,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -32,26 +32,41 @@ pub struct RegisterPatternParams {
     pub rule: String,
 }
 
+/// Maps a store/engine failure to an MCP `internal_error`, logging it
+/// first. `norma serve` is a long-running stdio process whose only
+/// observability channel is stderr (see `main.rs`'s stdout/stderr split);
+/// without this, every failure here -- a SQLite I/O error, a corrupted row
+/// -- was visible only inside the one JSON-RPC error response sent back to
+/// the client, with no local trail to diagnose a recurring problem from.
 fn to_tool_error(err: impl std::fmt::Display) -> ErrorData {
+    tracing::error!(error = %err, "MCP tool call failed");
     ErrorData::internal_error(err.to_string(), None)
+}
+
+/// Maps a client-caused failure (bad input) to an MCP `invalid_params`,
+/// logging it at `warn` rather than `error` -- this is an expected
+/// response to bad input, not a server fault.
+fn to_invalid_params(err: impl std::fmt::Display) -> ErrorData {
+    tracing::warn!(error = %err, "MCP tool call rejected invalid input");
+    ErrorData::invalid_params(err.to_string(), None)
 }
 
 fn to_json(value: &impl serde::Serialize) -> Result<String, ErrorData> {
     serde_json::to_string(value).map_err(to_tool_error)
 }
 
-/// The norma MCP tool server. Wraps a `PatternStore` and exposes the four
-/// tools from the wayfinder map: validating code, listing the patterns
-/// for a language, registering a new pattern, and listing every pattern.
-/// This is the same core the `norma validate` CLI subcommand calls
-/// (`cli.rs`), just reached over stdio instead -- see docs/adr/0001.md.
+/// The norma MCP tool server. Wraps a `PatternStore` and exposes four
+/// tools: validating code, listing the patterns for a language,
+/// registering a new pattern, and listing every pattern. This is the same
+/// core the `norma validate` CLI subcommand calls (`cli.rs`), just reached
+/// over stdio instead -- see docs/adr/0001.md.
 #[derive(Clone)]
 pub struct NormaServer {
     store: Arc<PatternStore>,
     tool_router: rmcp::handler::server::router::tool::ToolRouter<NormaServer>,
 }
 
-#[tool_router(server_handler)]
+#[tool_router]
 impl NormaServer {
     pub fn new(store: Arc<PatternStore>) -> Self {
         Self {
@@ -71,15 +86,15 @@ impl NormaServer {
         // `invalid_params` rather than a falsely-green result: matching zero
         // patterns would otherwise report `passed: true` and silently
         // disable the check.
-        let language = pattern_engine::resolve_language(&params.language)
-            .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+        let language =
+            pattern_engine::resolve_language(&params.language).map_err(to_invalid_params)?;
         let patterns = self
             .store
             .get_patterns_for_language(language)
             .await
             .map_err(to_tool_error)?;
         let result: ValidationResult = pattern_engine::validate(&params.code, language, &patterns)
-            .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+            .map_err(to_invalid_params)?;
         to_json(&result)
     }
 
@@ -88,8 +103,8 @@ impl NormaServer {
         &self,
         Parameters(params): Parameters<LanguageParams>,
     ) -> Result<String, ErrorData> {
-        let language = pattern_engine::resolve_language(&params.language)
-            .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+        let language =
+            pattern_engine::resolve_language(&params.language).map_err(to_invalid_params)?;
         let patterns = self
             .store
             .get_patterns_for_language(language)
@@ -103,6 +118,10 @@ impl NormaServer {
         &self,
         Parameters(params): Parameters<RegisterPatternParams>,
     ) -> Result<String, ErrorData> {
+        // `register_pattern` distinguishes "your rule was invalid" from "the
+        // database write failed" -- see `RegisterPatternError`'s doc comment.
+        // Conflating them (as a single `anyhow::Error` would) risks an MCP
+        // client interpreting a storage fault as its own mistake to retry.
         let pattern = self
             .store
             .register_pattern(
@@ -112,7 +131,10 @@ impl NormaServer {
                 params.rule,
             )
             .await
-            .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+            .map_err(|err| match err {
+                RegisterPatternError::InvalidRule(e) => to_invalid_params(e),
+                RegisterPatternError::Storage(e) => to_tool_error(e),
+            })?;
         to_json(&pattern)
     }
 
@@ -126,6 +148,14 @@ impl NormaServer {
         to_json(&patterns)
     }
 }
+
+// Explicit `router = self.tool_router` rather than the `#[tool_router(server_handler)]`
+// shorthand: that shorthand's generated `ServerHandler` impl calls
+// `Self::tool_router()` fresh on every request, rebuilding the whole tool
+// table each time instead of reusing the one built once in `new()` and
+// stored above -- functionally harmless, but wasted work on every call.
+#[tool_handler(router = self.tool_router)]
+impl ServerHandler for NormaServer {}
 
 /// Runs the norma MCP server on stdio until the client disconnects.
 pub async fn serve(store: Arc<PatternStore>) -> anyhow::Result<()> {
