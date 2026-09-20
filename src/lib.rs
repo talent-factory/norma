@@ -12,3 +12,4 @@ pub mod pattern_engine;
 pub mod pattern_store;
 pub mod default_patterns;
 pub mod mcp_server;
+pub mod cli;
