@@ -199,7 +199,11 @@ fn observer_presence_rust() {
         "rust",
         "struct Publisher { observers: Vec<Box<dyn Observer>> }",
     );
-    assert_does_not_match("observer-presence-rust", "rust", "struct Config { value: i32 }");
+    assert_does_not_match(
+        "observer-presence-rust",
+        "rust",
+        "struct Config { value: i32 }",
+    );
 }
 
 #[test]
@@ -287,4 +291,20 @@ fn strategy_overuse_typescript() {
         "typescript",
         "function pay(kind: string) { if (kind === 'card') { payByCard(); } }",
     );
+}
+
+/// Known limitation (see docs/superpowers/specs/2026-09-20-gof-pattern-set-v2-design.md,
+/// "Known limitations"): tree-sitter-python's `call` node carries no type
+/// information, so `factory-overuse-python` and `strategy-overuse-python`
+/// are structurally the same rule under different metavariable names --
+/// any Python if/elif type-switch matches both, unlike the other three
+/// languages (which separate `new`/struct-literal construction from plain
+/// calls at the AST-kind level). This test locks in that known, accepted
+/// overlap as documented behavior rather than letting it resurface as a
+/// silent surprise.
+#[test]
+fn factory_and_strategy_overuse_python_both_match_the_same_type_switch() {
+    let source = "def make(kind):\n    if kind == 'a':\n        Dog()\n    elif kind == 'b':\n        Cat()\n";
+    assert_matches("factory-overuse-python", "python", source);
+    assert_matches("strategy-overuse-python", "python", source);
 }
