@@ -1,5 +1,8 @@
+use crate::models::Pattern;
+use crate::pattern_engine;
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use serde::Serialize;
+use std::path::{Path, PathBuf};
 
 /// norma: design-pattern and code-quality validation via ast-grep.
 /// See docs/adr/0001.md -- one binary, subcommands share one core.
@@ -34,6 +37,71 @@ pub enum Command {
     },
     /// List every registered pattern.
     ListPatterns,
+}
+
+/// One file's validation outcome, as emitted by `norma validate --json`.
+/// `validate` accepts many files, so the JSON output is always an array of
+/// these -- even for a single file -- so consumers never have to branch on
+/// the argument count.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct FileReport {
+    pub file: PathBuf,
+    pub result: crate::models::ValidationResult,
+}
+
+/// Runs `pattern_engine::validate` against every file in `files` and
+/// aggregates the results. Extracted out of `main.rs` (rather than living
+/// inline in the `Command::Validate` match arm) so it can be covered by
+/// `cargo test --lib` instead of only by hand -- this loop combines
+/// several of the CLI's riskiest behaviors (multi-file aggregation, exit
+/// status, JSON array shape) in one place.
+///
+/// A file that can't be read fails the whole call with an error naming
+/// that file, rather than silently skipping it.
+pub fn validate_files(
+    files: &[PathBuf],
+    language: &str,
+    patterns: &[Pattern],
+) -> anyhow::Result<Vec<FileReport>> {
+    let mut reports = Vec::with_capacity(files.len());
+    for file in files {
+        let code = std::fs::read_to_string(file)
+            .map_err(|e| anyhow::anyhow!("{}: {e}", file.display()))?;
+        reports.push(FileReport {
+            file: file.clone(),
+            result: pattern_engine::validate(&code, language, patterns)?,
+        });
+    }
+    Ok(reports)
+}
+
+/// Decides where norma's SQLite registry lives, in precedence order:
+/// `--db`, then `$NORMA_DB`, then a fixed per-user path under `$HOME`.
+/// Takes the two environment values as plain arguments (rather than
+/// reading them itself) so this decision is testable without mutating
+/// process-global environment state.
+///
+/// Deliberately never defaults to a bare relative filename when better
+/// information exists: a relative path would give the pre-commit hook a
+/// stray `norma.db` in every consumer repo, and would hand an MCP client a
+/// different (empty) registry for every working directory it happens to
+/// launch `norma serve` from. The bare `norma.db` remains only as a
+/// last-resort fallback for the (unusual) case of an unset `$HOME`.
+pub fn resolve_db_path(
+    flag: Option<PathBuf>,
+    norma_db_env: Option<String>,
+    home_env: Option<String>,
+) -> PathBuf {
+    if let Some(path) = flag {
+        return path;
+    }
+    if let Some(env) = norma_db_env.filter(|v| !v.is_empty()) {
+        return PathBuf::from(env);
+    }
+    if let Some(home) = home_env.filter(|v| !v.is_empty()) {
+        return Path::new(&home).join(".local/share/norma/norma.db");
+    }
+    PathBuf::from("norma.db")
 }
 
 #[cfg(test)]
@@ -109,5 +177,120 @@ mod tests {
         assert_eq!(before.db, Some(PathBuf::from("/tmp/a.db")));
         assert_eq!(after.db, Some(PathBuf::from("/tmp/a.db")));
         assert_eq!(Cli::parse_from(["norma", "list-patterns"]).db, None);
+    }
+
+    // --- resolve_db_path -----------------------------------------------
+
+    #[test]
+    fn resolve_db_path_prefers_the_flag_over_everything_else() {
+        let path = resolve_db_path(
+            Some(PathBuf::from("/explicit.db")),
+            Some("/from-env.db".to_string()),
+            Some("/home/daniel".to_string()),
+        );
+        assert_eq!(path, PathBuf::from("/explicit.db"));
+    }
+
+    #[test]
+    fn resolve_db_path_prefers_norma_db_env_over_home_default() {
+        let path = resolve_db_path(
+            None,
+            Some("/from-env.db".to_string()),
+            Some("/home/daniel".to_string()),
+        );
+        assert_eq!(path, PathBuf::from("/from-env.db"));
+    }
+
+    #[test]
+    fn resolve_db_path_falls_back_to_a_fixed_path_under_home() {
+        let path = resolve_db_path(None, None, Some("/home/daniel".to_string()));
+        assert_eq!(
+            path,
+            PathBuf::from("/home/daniel/.local/share/norma/norma.db")
+        );
+    }
+
+    #[test]
+    fn resolve_db_path_ignores_an_empty_norma_db_value() {
+        // An env var set to the empty string (e.g. `NORMA_DB=`) must not
+        // win over the $HOME-based default the way an unset one wouldn't.
+        let path = resolve_db_path(None, Some(String::new()), Some("/home/daniel".to_string()));
+        assert_eq!(
+            path,
+            PathBuf::from("/home/daniel/.local/share/norma/norma.db")
+        );
+    }
+
+    #[test]
+    fn resolve_db_path_falls_back_to_a_bare_relative_name_when_home_is_unset() {
+        let path = resolve_db_path(None, None, None);
+        assert_eq!(path, PathBuf::from("norma.db"));
+    }
+
+    // --- validate_files --------------------------------------------------
+
+    const RUST_NO_DEBUG_PRINT: &str = r#"
+id: no-debug-print-rust
+message: Avoid println! in production code
+severity: warning
+language: Rust
+rule:
+  pattern: println!($$$ARGS)
+"#;
+
+    fn rust_pattern() -> Pattern {
+        let now = chrono::Utc::now();
+        Pattern::from_rule(
+            "No Debug Print".to_string(),
+            "d".to_string(),
+            None,
+            RUST_NO_DEBUG_PRINT.to_string(),
+            true,
+            now,
+            now,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn validate_files_aggregates_a_clean_file_and_a_violating_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let dirty = dir.path().join("dirty.rs");
+        let clean = dir.path().join("clean.rs");
+        std::fs::write(&dirty, "fn main() { println!(\"debug\"); }").unwrap();
+        std::fs::write(&clean, "fn main() { tracing::info!(\"fine\"); }").unwrap();
+
+        let reports =
+            validate_files(&[dirty.clone(), clean.clone()], "rust", &[rust_pattern()]).unwrap();
+
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[0].file, dirty);
+        assert!(!reports[0].result.passed);
+        assert_eq!(reports[1].file, clean);
+        assert!(reports[1].result.passed);
+    }
+
+    #[test]
+    fn validate_files_still_returns_a_one_element_array_for_a_single_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("only.rs");
+        std::fs::write(&file, "fn main() {}").unwrap();
+
+        let reports =
+            validate_files(std::slice::from_ref(&file), "rust", &[rust_pattern()]).unwrap();
+
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].file, file);
+    }
+
+    #[test]
+    fn validate_files_names_the_file_when_it_cannot_be_read() {
+        let missing = PathBuf::from("/definitely/does/not/exist.rs");
+        let err =
+            validate_files(std::slice::from_ref(&missing), "rust", &[rust_pattern()]).unwrap_err();
+        assert!(
+            err.to_string().contains("does/not/exist.rs"),
+            "unexpected error: {err}"
+        );
     }
 }

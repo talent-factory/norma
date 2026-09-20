@@ -1,22 +1,11 @@
 use clap::Parser;
-use norma::cli::{Cli, Command};
+use norma::cli::{self, Cli, Command};
 use norma::models::ValidationResult;
 use norma::pattern_store::PatternStore;
 use norma::{mcp_server, pattern_engine};
-use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
-
-/// One file's validation outcome, as emitted by `norma validate --json`.
-/// `validate` accepts many files, so the JSON output is always an array of
-/// these -- even for a single file -- so consumers never have to branch on
-/// the argument count.
-#[derive(Serialize)]
-struct FileReport<'a> {
-    file: &'a Path,
-    result: ValidationResult,
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -30,7 +19,11 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let db_path = resolve_db_path(cli.db);
+    let db_path = cli::resolve_db_path(
+        cli.db,
+        std::env::var("NORMA_DB").ok(),
+        std::env::var("HOME").ok(),
+    );
     if let Some(parent) = db_path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)?;
@@ -54,22 +47,13 @@ async fn main() -> anyhow::Result<()> {
             // not a run that matches zero patterns and reports "no violations".
             let language = pattern_engine::resolve_language(&language)?;
             let patterns = store.get_patterns_for_language(language).await?;
-
-            let mut reports = Vec::with_capacity(files.len());
-            for file in &files {
-                let code = std::fs::read_to_string(file)
-                    .map_err(|e| anyhow::anyhow!("{}: {e}", file.display()))?;
-                reports.push(FileReport {
-                    file,
-                    result: pattern_engine::validate(&code, language, &patterns)?,
-                });
-            }
+            let reports = cli::validate_files(&files, language, &patterns)?;
 
             if json {
                 println!("{}", serde_json::to_string_pretty(&reports)?);
             } else {
                 for report in &reports {
-                    print_human_readable(report.file, &report.result);
+                    print_human_readable(&report.file, &report.result);
                 }
             }
             // Any file with violations fails the whole run -- that is what
@@ -82,9 +66,9 @@ async fn main() -> anyhow::Result<()> {
             for p in store.list_all_patterns().await? {
                 println!(
                     "{:<28} {:<10} [{}] {}",
-                    p.id,
-                    p.language,
-                    p.severity.as_str(),
+                    p.id(),
+                    p.language(),
+                    p.severity().as_str(),
                     p.name
                 );
             }
@@ -93,30 +77,13 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Decides where norma's SQLite registry lives, in precedence order:
-/// `--db`, then `$NORMA_DB`, then a fixed per-user path under `$HOME`.
-/// It deliberately never defaults to a bare relative filename when better
-/// information exists: a relative path would give the pre-commit hook a
-/// stray `norma.db` in every consumer repo, and would hand an MCP client
-/// a different (empty) registry for every working directory it happens to
-/// launch `norma serve` from. The bare `norma.db` remains only as a
-/// last-resort fallback for the (unusual) case of an unset `$HOME`.
-fn resolve_db_path(flag: Option<PathBuf>) -> PathBuf {
-    if let Some(path) = flag {
-        return path;
-    }
-    if let Some(env) = std::env::var_os("NORMA_DB").filter(|v| !v.is_empty()) {
-        return PathBuf::from(env);
-    }
-    if let Some(home) = std::env::var_os("HOME").filter(|v| !v.is_empty()) {
-        return PathBuf::from(home).join(".local/share/norma/norma.db");
-    }
-    PathBuf::from("norma.db")
-}
-
 /// Prints a `ValidationResult` as `file:line:column: [severity] name -- text`
 /// lines, one per violation, plus a one-line summary -- the format
-/// `norma validate` uses without `--json` (see the CLI/pre-commit ticket).
+/// `norma validate` uses without `--json` (this format is this function's
+/// own choice; the CLI/pre-commit ticket only decided that text-by-default
+/// vs. `--json` split, not the exact string). A synthetic coverage
+/// warning (see `pattern_engine::validate`) has no `matched_text`, so its
+/// `message` is shown instead.
 fn print_human_readable(file: &Path, result: &ValidationResult) {
     if result.violations.is_empty() {
         println!(
@@ -127,6 +94,11 @@ fn print_human_readable(file: &Path, result: &ValidationResult) {
         return;
     }
     for v in &result.violations {
+        let detail = if v.matched_text.is_empty() {
+            &v.message
+        } else {
+            &v.matched_text
+        };
         println!(
             "{}:{}:{}: [{}] {} -- {}",
             file.display(),
@@ -134,13 +106,14 @@ fn print_human_readable(file: &Path, result: &ValidationResult) {
             v.location.column + 1,
             v.severity.as_str(),
             v.pattern_name,
-            v.matched_text
+            detail
         );
     }
     println!(
-        "{} violation(s), score {:.2} ({} ms)",
+        "{} violation(s), score {:.2}, {} pattern(s) checked ({} ms)",
         result.violations.len(),
         result.score,
+        result.checked_patterns,
         result.duration_ms
     );
 }

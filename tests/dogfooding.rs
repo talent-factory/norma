@@ -4,6 +4,7 @@
 //! ticket (`.scratch/norma-architecture/issues/05-mvp-pattern-set-scope.md`).
 
 use norma::default_patterns;
+use norma::models::Pattern;
 use norma::pattern_engine::{parse_rule, validate};
 use std::fs;
 use std::path::Path;
@@ -15,18 +16,17 @@ fn norma_has_no_debug_prints_in_its_own_source() {
         .find(|def| parse_rule(def.rule).unwrap().id == "no-debug-print-rust")
         .expect("the MVP pattern set must include a Rust default pattern");
 
-    let pattern = norma::models::Pattern {
-        id: "no-debug-print-rust".to_string(),
-        name: rust_default.name.to_string(),
-        description: rust_default.description.to_string(),
-        category: Some(rust_default.category.to_string()),
-        language: "rust".to_string(),
-        severity: norma::models::Severity::Warning,
-        rule: rust_default.rule.to_string(),
-        enabled: true,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    };
+    let now = chrono::Utc::now();
+    let pattern = Pattern::from_rule(
+        rust_default.name.to_string(),
+        rust_default.description.to_string(),
+        Some(rust_default.category.to_string()),
+        rust_default.rule.to_string(),
+        true,
+        now,
+        now,
+    )
+    .expect("the Rust default pattern's rule must be valid");
 
     let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut total_violations = 0;
