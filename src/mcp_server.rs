@@ -1,7 +1,10 @@
 use crate::models::ValidationResult;
 use crate::pattern_engine;
 use crate::pattern_store::PatternStore;
-use rmcp::{ErrorData, ServiceExt, handler::server::wrapper::Parameters, tool, tool_router, transport::stdio};
+use rmcp::{
+    handler::server::wrapper::Parameters, tool, tool_router, transport::stdio, ErrorData,
+    ServiceExt,
+};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -57,17 +60,26 @@ impl NormaServer {
         }
     }
 
-    #[tool(description = "Validate source code against every enabled pattern registered for its language")]
+    #[tool(
+        description = "Validate source code against every enabled pattern registered for its language"
+    )]
     pub async fn validate_pattern_compliance(
         &self,
         Parameters(params): Parameters<ValidateParams>,
     ) -> Result<String, ErrorData> {
+        // Reject an unsupported/misspelled language up front, as
+        // `invalid_params` rather than a falsely-green result: matching zero
+        // patterns would otherwise report `passed: true` and silently
+        // disable the check.
+        let language = pattern_engine::resolve_language(&params.language)
+            .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
         let patterns = self
             .store
-            .get_patterns_for_language(&params.language)
+            .get_patterns_for_language(language)
             .await
             .map_err(to_tool_error)?;
-        let result: ValidationResult = pattern_engine::validate(&params.code, &params.language, &patterns);
+        let result: ValidationResult = pattern_engine::validate(&params.code, language, &patterns)
+            .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
         to_json(&result)
     }
 
@@ -76,9 +88,11 @@ impl NormaServer {
         &self,
         Parameters(params): Parameters<LanguageParams>,
     ) -> Result<String, ErrorData> {
+        let language = pattern_engine::resolve_language(&params.language)
+            .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
         let patterns = self
             .store
-            .get_patterns_for_language(&params.language)
+            .get_patterns_for_language(language)
             .await
             .map_err(to_tool_error)?;
         to_json(&patterns)
@@ -91,7 +105,12 @@ impl NormaServer {
     ) -> Result<String, ErrorData> {
         let pattern = self
             .store
-            .register_pattern(params.name, params.description, params.category, params.rule)
+            .register_pattern(
+                params.name,
+                params.description,
+                params.category,
+                params.rule,
+            )
             .await
             .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
         to_json(&pattern)
@@ -99,7 +118,11 @@ impl NormaServer {
 
     #[tool(description = "List every registered pattern")]
     pub async fn list_patterns(&self) -> Result<String, ErrorData> {
-        let patterns = self.store.list_all_patterns().await.map_err(to_tool_error)?;
+        let patterns = self
+            .store
+            .list_all_patterns()
+            .await
+            .map_err(to_tool_error)?;
         to_json(&patterns)
     }
 }
@@ -146,6 +169,23 @@ mod tests {
         let json = server.list_patterns().await.unwrap();
         let patterns: Vec<Pattern> = serde_json::from_str(&json).unwrap();
         assert_eq!(patterns.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn validate_pattern_compliance_rejects_an_unsupported_language() {
+        let server = test_server().await;
+        let params = Parameters(ValidateParams {
+            code: "package main".to_string(),
+            language: "go".to_string(),
+        });
+        let err = server
+            .validate_pattern_compliance(params)
+            .await
+            .expect_err("an unsupported language must not report a passing result");
+        assert!(
+            err.message.contains("unsupported language"),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[tokio::test]

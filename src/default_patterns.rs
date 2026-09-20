@@ -15,7 +15,8 @@ pub struct DefaultPattern {
 pub const ALL: &[DefaultPattern] = &[
     DefaultPattern {
         name: "No Debug Print",
-        description: "System.out.println left in production code should go through a proper logger instead.",
+        description:
+            "System.out.println left in production code should go through a proper logger instead.",
         category: "code-quality",
         rule: r#"
 id: no-debug-print-java
@@ -41,7 +42,8 @@ rule:
     },
     DefaultPattern {
         name: "No Debug Print",
-        description: "println! left in production code should go through the `tracing` crate instead.",
+        description:
+            "println! left in production code should go through the `tracing` crate instead.",
         category: "code-quality",
         rule: r#"
 id: no-debug-print-rust
@@ -54,7 +56,8 @@ rule:
     },
     DefaultPattern {
         name: "No Debug Print",
-        description: "console.log left in production code should go through a proper logger instead.",
+        description:
+            "console.log left in production code should go through a proper logger instead.",
         category: "code-quality",
         rule: r#"
 id: no-debug-print-typescript
@@ -79,6 +82,7 @@ mod tests {
             .map(|def| {
                 let config = parse_rule(def.rule).expect("default rule must parse");
                 crate::pattern_engine::language_key(config.language)
+                    .expect("every default rule must target a language norma supports")
             })
             .collect();
         languages.sort();

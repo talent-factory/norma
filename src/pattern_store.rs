@@ -1,10 +1,10 @@
 use crate::models::{Pattern, Severity};
 use crate::pattern_engine::{language_key, parse_rule};
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use ast_grep_config::Severity as AstGrepSeverity;
 use chrono::Utc;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions, SqliteRow};
 use sqlx::Row;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions, SqliteRow};
 use std::path::Path;
 
 /// SQLite-backed registry of `Pattern`s. See docs/adr/0002.md for the
@@ -19,10 +19,16 @@ impl PatternStore {
     /// Opens (creating if missing) a SQLite database at `db_path` and
     /// ensures the `patterns` table exists.
     pub async fn new<P: AsRef<Path>>(db_path: P) -> Result<Self> {
-        let database_url = format!("sqlite:{}?mode=rwc", db_path.as_ref().display());
+        // Build the connection options programmatically rather than
+        // interpolating the path into a `sqlite:...?mode=rwc` URL: a path
+        // containing `?` or `#` would otherwise be parsed as a query string
+        // or fragment and silently point at the wrong file.
+        let options = SqliteConnectOptions::new()
+            .filename(db_path.as_ref())
+            .create_if_missing(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(&database_url)
+            .connect_with(options)
             .await?;
         sqlx::query(
             r#"
@@ -52,6 +58,8 @@ impl PatternStore {
     /// ast-grep RuleConfig -- nothing is written to SQLite in that case.
     /// `id`, `language` and `severity` are derived from the parsed YAML,
     /// never accepted as separate inputs, so they cannot drift from it.
+    /// A rule for a language norma does not support is rejected the same
+    /// way -- storing it would produce a row no lookup could ever reach.
     pub async fn register_pattern(
         &self,
         name: String,
@@ -63,13 +71,20 @@ impl PatternStore {
         if config.id.is_empty() {
             bail!("rule YAML must set a non-empty top-level `id`");
         }
+        let Some(language) = language_key(config.language) else {
+            bail!(
+                "unsupported language: {:?} (norma supports: {})",
+                config.language,
+                crate::pattern_engine::SUPPORTED_LANGUAGES.join(", ")
+            );
+        };
         let now = Utc::now();
         let pattern = Pattern {
             id: config.id.clone(),
             name,
             description,
             category,
-            language: language_key(config.language).to_string(),
+            language: language.to_string(),
             severity: severity_from_ast_grep(&config.severity),
             rule: rule_yaml,
             enabled: true,
@@ -238,6 +253,36 @@ rule:
         assert!(store.list_all_patterns().await.unwrap().is_empty());
     }
 
+    const GO_RULE: &str = r#"
+id: no-debug-print-go
+message: Avoid fmt.Println in production code
+severity: warning
+language: Go
+rule:
+  pattern: fmt.Println($$$ARGS)
+"#;
+
+    #[tokio::test]
+    async fn register_pattern_rejects_a_language_norma_does_not_support() {
+        let store = test_store().await;
+        let result = store
+            .register_pattern(
+                "No Debug Print".to_string(),
+                "fmt.Println left in production code".to_string(),
+                None,
+                GO_RULE.to_string(),
+            )
+            .await;
+        let err = result.expect_err("a Go pattern must be rejected, not stored");
+        assert!(
+            err.to_string().contains("unsupported language"),
+            "unexpected error: {err}"
+        );
+        // Nothing should have been written -- in particular no row tagged
+        // with a placeholder language that no lookup could ever reach.
+        assert!(store.list_all_patterns().await.unwrap().is_empty());
+    }
+
     #[tokio::test]
     async fn get_patterns_for_language_only_returns_matching_language() {
         let store = test_store().await;
@@ -250,19 +295,39 @@ rule:
             )
             .await
             .unwrap();
-        assert_eq!(store.get_patterns_for_language("rust").await.unwrap().len(), 1);
-        assert_eq!(store.get_patterns_for_language("python").await.unwrap().len(), 0);
+        assert_eq!(
+            store.get_patterns_for_language("rust").await.unwrap().len(),
+            1
+        );
+        assert_eq!(
+            store
+                .get_patterns_for_language("python")
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
     }
 
     #[tokio::test]
     async fn register_pattern_upserts_on_matching_id() {
         let store = test_store().await;
         store
-            .register_pattern("v1".to_string(), "d".to_string(), None, RUST_RULE.to_string())
+            .register_pattern(
+                "v1".to_string(),
+                "d".to_string(),
+                None,
+                RUST_RULE.to_string(),
+            )
             .await
             .unwrap();
         store
-            .register_pattern("v2".to_string(), "d".to_string(), None, RUST_RULE.to_string())
+            .register_pattern(
+                "v2".to_string(),
+                "d".to_string(),
+                None,
+                RUST_RULE.to_string(),
+            )
             .await
             .unwrap();
         let all = store.list_all_patterns().await.unwrap();

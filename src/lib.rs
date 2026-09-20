@@ -7,9 +7,9 @@
 //! docs/superpowers/plans/2026-09-20-norma-mvp-implementation.md; each
 //! addition should keep `cargo test --lib` green.
 
+pub mod cli;
+pub mod default_patterns;
+pub mod mcp_server;
 pub mod models;
 pub mod pattern_engine;
 pub mod pattern_store;
-pub mod default_patterns;
-pub mod mcp_server;
-pub mod cli;

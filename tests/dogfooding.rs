@@ -43,7 +43,7 @@ fn norma_has_no_debug_prints_in_its_own_source() {
             continue;
         }
         let code = fs::read_to_string(&path).unwrap();
-        let result = validate(&code, "rust", std::slice::from_ref(&pattern));
+        let result = validate(&code, "rust", std::slice::from_ref(&pattern)).unwrap();
         assert!(
             result.violations.is_empty(),
             "{} contains a debug println!: {:?}",

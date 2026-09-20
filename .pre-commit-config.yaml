@@ -7,6 +7,10 @@ repos:
           Validates staged files against norma's registered patterns.
           Requires `norma` to be installed and on PATH first: run
           `cargo install --path .` once from the norma repo.
-        entry: norma validate --language rust --file
+        entry: norma validate --language rust --json
         language: system
         files: \.rs$
+        # pre-commit appends every staged file to `entry`; `norma validate`
+        # takes those as positional arguments. Serial, because concurrent
+        # invocations would open the same SQLite database at once.
+        require_serial: true
