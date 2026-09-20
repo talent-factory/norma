@@ -17,6 +17,7 @@ Eine Architektur-Spezifikation für norma (Rust MCP Server zur Design-Pattern-Va
 - [mcpkit vs. Alternative (research)](issues/01-mcpkit-vs-alternative.md) — Wechsel zu `rmcp` (offizielles MCP-Rust-SDK); `mcpkit` bleibt wegen geringer Reife/Aktivität und struktureller Facade-Crate-Probleme (Build-Fehler nicht trivial fixbar) nicht das Fundament.
 - [Pattern-Matching-Ansatz (grilling)](issues/02-pattern-matching-approach.md) — `ast-grep-core` (aktiv gepflegt, alle 4 MVP-Sprachen abgedeckt); Pattern-`rule`-Feld einheitlich im YAML-Rule-Format gespeichert.
 - [CLI/Pre-Commit-Architektur (grilling)](issues/03-cli-pre-commit-architecture.md) — ein Binary mit `clap`-Subcommands, geteilter async Core mit dem MCP-Server, Pre-Commit via `language: system`; siehe [ADR 0001](../../docs/adr/0001-single-binary-shared-validation-core.md).
+- [Pattern-Datenmodell & SQLite-Schema (grilling)](issues/04-pattern-data-model-schema.md) — breiter Scope (nicht nur GoF-Patterns), `Pattern` ist einsprachig (kein Join-Table), `rule` speichert die volle ast-grep-RuleConfig-YAML, Fail-Fast-Validierung beim Registrieren. Verifiziert per Probe gegen echtes `ast-grep-core`; siehe [ADR 0002](../../docs/adr/0002-pattern-single-language-full-rule-config.md).
 
 ## Not yet specified
 
