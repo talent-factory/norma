@@ -15,117 +15,39 @@
 - ✅ **Custom Patterns** — Define team-specific coding standards
 - ✅ **Educational Focus** — Perfect for teaching design patterns
 
-## 🚀 Quick Start
+## Usage
 
-### Prerequisites
-
-- Rust 1.70+ (install via [rustup](https://rustup.rs/))
-- SQLite 3.0+
-
-### Installation
+Build and install once:
 
 ```bash
-git clone https://github.com/talent-factory/norma.git
-cd norma
 cargo build --release
+cargo install --path .
 ```
 
-The binary will be at `target/release/norma`.
-
-### Running the MCP Server
+Run the MCP tool server (for Claude Code / MCP Inspector):
 
 ```bash
-./target/release/norma
+norma serve
 ```
 
-The server listens on stdin/stdout and is ready for MCP client connections.
-
-### Using with Claude Code
-
-1. Add to `.claude/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "norma": {
-      "command": "/path/to/norma"
-    }
-  }
-}
-```
-
-2. Restart Claude Code
-3. Use the norma tools in your prompts:
-
-```
-Validate this Java code against our design patterns
-```
-
-## 📚 Usage
-
-### Validate Code
+Validate a file from the command line:
 
 ```bash
-# In Claude Code or via MCP client
-tool: validate_pattern_compliance
-code: "public class Singleton { ... }"
-language: "java"
+norma validate --file src/main.rs --language rust
+norma validate --file src/main.rs --language rust --json
 ```
 
-**Response:**
-```json
-{
-  "violations": [
-    {
-      "pattern_name": "Singleton Pattern",
-      "severity": "warning",
-      "location": { "file": "code", "line": 1, "column": 0 },
-      "message": "Missing synchronized keyword on getInstance()",
-      "suggestion": "Add synchronized to getInstance() method"
-    }
-  ],
-  "passed": false,
-  "score": 0.7,
-  "duration_ms": 42
-}
-```
-
-### Get Pattern Checklist
+List every registered pattern:
 
 ```bash
-tool: get_pattern_checklist
-language: "java"
+norma list-patterns
 ```
 
-**Response:**
-```json
-[
-  {
-    "id": "java-singleton",
-    "name": "Singleton Pattern",
-    "description": "Ensure proper Singleton implementation",
-    "severity": "warning",
-    "enabled": true
-  },
-  {
-    "id": "java-factory",
-    "name": "Factory Pattern",
-    "description": "Use Factory pattern for object creation",
-    "severity": "info",
-    "enabled": true
-  }
-]
-```
-
-### Register Custom Pattern
+Enable the pre-commit hook (see `.pre-commit-config.yaml` -- requires
+`norma` already installed via `cargo install --path .`):
 
 ```bash
-tool: register_pattern
-name: "My Custom Pattern"
-description: "Check for X in code"
-rule: "regex pattern or AST-grep rule"
-languages: ["java", "typescript"]
-severity: "warning"
+pre-commit install
 ```
 
 ## 🏗️ Architecture
