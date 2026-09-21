@@ -254,4 +254,27 @@ mod tests {
         let result = server.register_pattern(params).await;
         assert!(result.is_err());
     }
+
+    /// Pins the schema shape `optional_string_schema` exists to produce, so
+    /// a future schemars upgrade or a "this attribute looks redundant"
+    /// cleanup of `#[serde(default)]` fails loudly instead of silently
+    /// reintroducing the MCP Inspector portability warning this schema was
+    /// fixed for (see the doc comments on `RegisterPatternParams::category`
+    /// and `optional_string_schema`).
+    #[test]
+    fn register_pattern_schema_keeps_category_optional_and_portable() {
+        let schema = serde_json::to_value(schemars::schema_for!(RegisterPatternParams)).unwrap();
+
+        let category = &schema["properties"]["category"];
+        assert!(
+            category["anyOf"].is_array() && category["type"].is_null(),
+            "category must render as anyOf, not a `type` array: {category}"
+        );
+
+        let required = schema["required"].as_array().unwrap();
+        assert!(
+            !required.iter().any(|field| field == "category"),
+            "category must stay out of `required`: {required:?}"
+        );
+    }
 }
