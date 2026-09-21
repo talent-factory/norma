@@ -1,4 +1,5 @@
 Type: grilling
+Status: resolved
 
 ## Question
 
@@ -10,3 +11,13 @@ Zu klären:
 - Alle 28 freischalten, eine kuratierte Zusatzliste (welche?), oder MVP-4 bewusst so belassen (Issue 05 der alten Map war eine bewusste Scope-Entscheidung — gilt die Begründung noch)?
 - Falls Erweiterung: braucht jede neue Sprache eigene Default-Patterns (`default_patterns.rs`), oder bleibt sie zunächst "nur registrierbar" ohne mitgelieferte Patterns?
 - SQLite-Schema/CLI-Validierung (`SUPPORTED_LANGUAGES`-Konstante) mitziehen.
+
+## Answer
+
+**Verdict: adopt.** Alle 28 `SupportLang`-Sprachen werden generisch für die Registrierung freigeschaltet — keine kuratierte Zusatzliste, MVP-4 wird nicht künstlich beibehalten.
+
+1. **Umfang**: alle 28 statt einer Teilmenge — technisch kostenlos (schon einkompiliert über das Default-Feature `builtin-parser`), vermeidet beliebiges Bikeshedding, welche Sprachen "es wert sind".
+2. **Default-Patterns**: die 24 neu freigeschalteten Sprachen bleiben **nur registrierbar**, ohne eingebaute Default-Patterns. Pattern-Autoring pro Sprache ist eigene, nicht-triviale Arbeit (vgl. GoF-Pattern-Set) und damit expliziter, separater Folge-Effort — nicht Teil dieses mechanischen Tickets. Die pädagogische Fokussierung der alten Map bleibt so über die *mitgelieferten* Patterns gewahrt, nicht über eine künstliche Registrierungssperre.
+3. **Implementierung**: `language_key`/`SUPPORTED_LANGUAGES` werden **generisch aus `SupportLang::all_langs()` abgeleitet** statt hart um 28 Strings erweitert — vermeidet Drift bei künftigen `ast-grep-language`-Versionsbumps. `resolve_language`s Sicherheitseigenschaft (unbekannte/falsch geschriebene Sprache wird laut abgelehnt statt still 0 Patterns zu matchen) bleibt vollständig erhalten, da `SupportLang::from_str` weiterhin alles ausserhalb der 28 bekannten Sprachen ablehnt.
+
+→ Graduiert zu [TF-893](https://linear.app/talent-factory/issue/TF-893) im `norma`-Projekt.
