@@ -25,7 +25,7 @@ ast-grep ships its own experimental MCP server, [`ast-grep-mcp`](https://github.
 | Answers | "Where does X occur in this code, and how do I write a rule for it?" | "Does this code violate one of our team's standing rules?" |
 | Rules | ephemeral — built by the AI agent per call, never stored | persistent — registered once via `register_pattern`, enforced on every later call |
 | Implementation | Python, shells out to the `ast-grep` CLI as a subprocess | Rust, links `ast-grep-core`/`-config`/`-language` directly as a library (no subprocess) |
-| Tools | `dump_syntax_tree`, `test_match_code_rule`, `find_code`, `find_code_by_rule` — a search/debug workflow | `validate_pattern_compliance`, `get_pattern_checklist`, `register_pattern`, `list_patterns` — a compliance workflow |
+| Tools | `dump_syntax_tree`, `test_match_code_rule`, `find_code`, `find_code_by_rule` — a search/debug workflow | `validate_pattern_compliance`, `apply_pattern_fix`, `get_pattern_checklist`, `register_pattern`, `list_patterns` — a compliance workflow |
 | State | none (SQLite-free) | SQLite-backed `PatternStore`, survives restarts and project switches |
 | Status | explicitly experimental | in production use here, with tests and ADRs (`docs/adr/`) |
 
@@ -53,6 +53,19 @@ so shell globs and `pre-commit`'s staged-file list both work):
 norma validate --language rust src/main.rs
 norma validate --language rust --json src/*.rs
 ```
+
+Rewrite files in-place with every non-conflicting pattern fix applied (like
+`eslint --fix`/`biome --fix`), then report what's left:
+
+```bash
+norma validate --language rust --fix src/main.rs
+```
+
+There's no dry-run mode in v1 -- keeping a clean git working tree beforehand
+so you can review or revert the rewrite is on you, not enforced by norma.
+If two patterns' fixes overlap on the same code, *neither* is applied and a
+`[warning] fix conflict` line is printed instead (fail-safe over guessing a
+winner).
 
 Exit status is non-zero if *any* file has violations.
 
