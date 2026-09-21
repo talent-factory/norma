@@ -37,7 +37,11 @@ pub struct RegisterPatternParams {
     #[serde(default)]
     #[schemars(schema_with = "optional_string_schema")]
     pub category: Option<String>,
-    /// A full ast-grep RuleConfig YAML document (id/message/severity/language/rule).
+    /// A full ast-grep RuleConfig YAML document
+    /// (id/message/severity/language/rule, optionally fix). A `fix:` key
+    /// makes the pattern usable by `apply_pattern_fix` and populates
+    /// `validate_pattern_compliance`'s `suggested_fix` on a match; without
+    /// one, the pattern can still be validated against, just not fixed.
     pub rule: String,
 }
 
@@ -79,11 +83,12 @@ fn to_json(value: &impl serde::Serialize) -> Result<String, ErrorData> {
     serde_json::to_string(value).map_err(to_tool_error)
 }
 
-/// The norma MCP tool server. Wraps a `PatternStore` and exposes four
-/// tools: validating code, listing the patterns for a language,
-/// registering a new pattern, and listing every pattern. This is the same
-/// core the `norma validate` CLI subcommand calls (`cli.rs`), just reached
-/// over stdio instead -- see docs/adr/0001.md.
+/// The norma MCP tool server. Wraps a `PatternStore` and exposes five
+/// tools: validating code, applying registered patterns' fixes to code,
+/// listing the patterns for a language, registering a new pattern, and
+/// listing every pattern. This is the same core the `norma validate` CLI
+/// subcommand calls (`cli.rs`), just reached over stdio instead -- see
+/// docs/adr/0001.md.
 #[derive(Clone)]
 pub struct NormaServer {
     store: Arc<PatternStore>,
@@ -118,6 +123,32 @@ impl NormaServer {
             .await
             .map_err(to_tool_error)?;
         let result: ValidationResult = pattern_engine::validate(&params.code, language, &patterns)
+            .map_err(to_invalid_params)?;
+        to_json(&result)
+    }
+
+    /// Applies every enabled pattern's `fix`/`fixer` to `params.code` and
+    /// returns the rewritten source, never writing to disk itself -- the
+    /// caller decides what to do with the returned string (see TF-890:
+    /// this stays deliberately separate from `validate_pattern_compliance`,
+    /// with no `apply_fixes` flag added to it, to keep read-only and
+    /// write-shaped tools apart). Reuses `ValidateParams`: same `code` +
+    /// `language` shape as `validate_pattern_compliance`.
+    #[tool(
+        description = "Rewrite source code by applying every enabled pattern's fix, and return the rewritten code (never written to disk)"
+    )]
+    pub async fn apply_pattern_fix(
+        &self,
+        Parameters(params): Parameters<ValidateParams>,
+    ) -> Result<String, ErrorData> {
+        let language =
+            pattern_engine::resolve_language(&params.language).map_err(to_invalid_params)?;
+        let patterns = self
+            .store
+            .get_patterns_for_language(language)
+            .await
+            .map_err(to_tool_error)?;
+        let result = pattern_engine::apply_fixes(&params.code, language, &patterns)
             .map_err(to_invalid_params)?;
         to_json(&result)
     }
@@ -275,6 +306,84 @@ mod tests {
         assert!(
             !required.iter().any(|field| field == "category"),
             "category must stay out of `required`: {required:?}"
+        );
+    }
+
+    // --- apply_pattern_fix (TF-890) -----------------------------------
+
+    async fn register_unwrap_fixer(server: &NormaServer) {
+        let params = Parameters(RegisterPatternParams {
+            name: "No Unwrap".to_string(),
+            description: "d".to_string(),
+            category: None,
+            rule: r#"
+id: no-unwrap-rust
+message: Avoid unwrap() in production code
+severity: warning
+language: Rust
+rule:
+  pattern: $EXPR.unwrap()
+fix: $EXPR.expect("TODO")
+"#
+            .to_string(),
+        });
+        server.register_pattern(params).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn apply_pattern_fix_rewrites_the_code_and_never_touches_disk() {
+        use crate::models::FixResult;
+
+        let server = test_server().await;
+        register_unwrap_fixer(&server).await;
+
+        let params = Parameters(ValidateParams {
+            code: "fn main() { value.unwrap(); }".to_string(),
+            language: "rust".to_string(),
+        });
+        let json = server.apply_pattern_fix(params).await.unwrap();
+        let result: FixResult = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(result.applied_count, 1);
+        assert!(result.conflicts.is_empty());
+        assert_eq!(
+            result.fixed_source,
+            r#"fn main() { value.expect("TODO"); }"#
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_pattern_fix_leaves_code_without_a_fixable_match_unchanged() {
+        use crate::models::FixResult;
+
+        let server = test_server().await;
+        register_unwrap_fixer(&server).await;
+
+        let params = Parameters(ValidateParams {
+            code: "fn main() {}".to_string(),
+            language: "rust".to_string(),
+        });
+        let json = server.apply_pattern_fix(params).await.unwrap();
+        let result: FixResult = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(result.applied_count, 0);
+        assert_eq!(result.fixed_source, "fn main() {}");
+    }
+
+    #[tokio::test]
+    async fn apply_pattern_fix_rejects_an_unsupported_language() {
+        let server = test_server().await;
+        let params = Parameters(ValidateParams {
+            code: "package main".to_string(),
+            language: "go".to_string(),
+        });
+        let err = server
+            .apply_pattern_fix(params)
+            .await
+            .expect_err("an unsupported language must be rejected, not silently no-op'd");
+        assert!(
+            err.message.contains("unsupported language"),
+            "unexpected error: {err:?}"
         );
     }
 }

@@ -40,27 +40,45 @@ async fn main() -> anyhow::Result<()> {
             files,
             language,
             json,
+            fix,
         } => {
             // Resolve the language once, before any file is read: an
             // unsupported or misspelled `--language` must be a loud error,
             // not a run that matches zero patterns and reports "no violations".
             let language = pattern_engine::resolve_language(&language)?;
             let patterns = store.get_patterns_for_language(language).await?;
-            let reports = cli::validate_files(&files, language, &patterns)?;
 
-            if json {
-                println!("{}", serde_json::to_string_pretty(&reports)?);
-            } else {
-                for report in &reports {
-                    println!(
-                        "{}",
-                        cli::render_human_readable(&report.file, &report.result)
-                    );
+            // `--fix` rewrites each file in-place (see `cli::fix_files`)
+            // before reporting; otherwise this is a read-only check. Both
+            // paths share the same pass/fail exit-status rule below, so
+            // `--fix` still exits 1 for whatever the fixes couldn't clear.
+            let passed = if fix {
+                let reports = cli::fix_files(&files, language, &patterns)?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&reports)?);
+                } else {
+                    for report in &reports {
+                        println!("{}", cli::render_fix_report(&report.file, report));
+                    }
                 }
-            }
+                reports.iter().all(|r| r.result.passed)
+            } else {
+                let reports = cli::validate_files(&files, language, &patterns)?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&reports)?);
+                } else {
+                    for report in &reports {
+                        println!(
+                            "{}",
+                            cli::render_human_readable(&report.file, &report.result)
+                        );
+                    }
+                }
+                reports.iter().all(|r| r.result.passed)
+            };
             // Any file with violations fails the whole run -- that is what
             // makes this usable as a pre-commit hook over a batch of files.
-            if reports.iter().any(|r| !r.result.passed) {
+            if !passed {
                 std::process::exit(1);
             }
         }

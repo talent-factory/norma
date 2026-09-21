@@ -30,6 +30,13 @@ pub enum Command {
         /// Print machine-readable JSON instead of human-readable text.
         #[arg(long)]
         json: bool,
+        /// Rewrite each file in-place with every non-conflicting pattern
+        /// fix applied (like `eslint --fix`/`biome --fix`), then report
+        /// what remains. No dry-run in v1 -- keeping a clean git working
+        /// tree beforehand is the caller's responsibility, documented but
+        /// not enforced. See `pattern_engine::apply_fixes` and TF-890.
+        #[arg(long)]
+        fix: bool,
         /// Files to validate. Positional (and variadic) so `pre-commit`
         /// can append every staged file to the hook's `entry` line.
         #[arg(required = true, num_args = 1.., value_name = "FILE")]
@@ -70,6 +77,72 @@ pub fn validate_files(
         reports.push(FileReport {
             file: file.clone(),
             result: pattern_engine::validate(&code, language, patterns)?,
+        });
+    }
+    Ok(reports)
+}
+
+/// One file's outcome for `norma validate --fix`, as emitted by its
+/// `--json` output.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct FixReport {
+    pub file: PathBuf,
+    pub applied: usize,
+    pub conflicts: Vec<crate::models::FixConflict>,
+    /// `(pattern_id, parse error)` for every enabled pattern whose stored
+    /// `rule` no longer parses -- forwarded from `FixResult::skipped_rules`.
+    pub skipped_rules: Vec<(String, String)>,
+    /// The remaining violations after applying every non-conflicting fix
+    /// -- includes anything left over: unfixable patterns, conflicted
+    /// matches, and any real defect the fixes didn't touch.
+    pub result: crate::models::ValidationResult,
+}
+
+/// Runs `pattern_engine::apply_fixes` against every file in `files`,
+/// writes the rewritten source back in-place when it actually changed
+/// anything, and re-validates the (now-fixed) file so `FixReport.result`
+/// reflects what's left rather than what applying fixes just erased. See
+/// `pattern_engine::apply_fixes`'s doc comment for the fail-safe conflict
+/// policy this reports via `FixReport.conflicts`.
+///
+/// A file is only written when at least one fix was applied -- an
+/// unmodified file keeps its original mtime, so this is safe to run
+/// against a directory `norma validate` (without `--fix`) already found
+/// clean.
+///
+/// Every file is read up front, before any file is written: `--fix`
+/// mutates files as a side effect, so failing an unreadable file *after*
+/// already rewriting earlier ones in the batch (as `validate_files`'s
+/// read-as-you-go loop would, harmlessly, since it never writes) would
+/// leave those rewrites unreported -- the caller's only signal would be an
+/// error naming just the one file that failed to read. Reading everything
+/// first means a read failure here still means nothing was written.
+pub fn fix_files(
+    files: &[PathBuf],
+    language: &str,
+    patterns: &[Pattern],
+) -> anyhow::Result<Vec<FixReport>> {
+    let mut sources = Vec::with_capacity(files.len());
+    for file in files {
+        let code = std::fs::read_to_string(file)
+            .map_err(|e| anyhow::anyhow!("{}: {e}", file.display()))?;
+        sources.push((file, code));
+    }
+
+    let mut reports = Vec::with_capacity(files.len());
+    for (file, code) in sources {
+        let fix = pattern_engine::apply_fixes(&code, language, patterns)?;
+        if fix.applied_count > 0 {
+            std::fs::write(file, &fix.fixed_source)
+                .map_err(|e| anyhow::anyhow!("{}: {e}", file.display()))?;
+        }
+        let result = pattern_engine::validate(&fix.fixed_source, language, patterns)?;
+        reports.push(FixReport {
+            file: file.clone(),
+            applied: fix.applied_count,
+            conflicts: fix.conflicts,
+            skipped_rules: fix.skipped_rules,
+            result,
         });
     }
     Ok(reports)
@@ -127,6 +200,38 @@ pub fn render_human_readable(file: &Path, result: &ValidationResult) -> String {
         "{} violation(s) ({} informational), score {:.2}, {} pattern(s) checked ({} ms)",
         blocking, informational, result.score, result.checked_patterns, result.duration_ms
     ));
+    out
+}
+
+/// Renders a `FixReport` as an "applied N fix(es)" line (if any were),
+/// one `[warning] fix conflict` line per unapplied overlapping cluster,
+/// and then the remaining violations via `render_human_readable` -- the
+/// human-readable format `norma validate --fix` uses without `--json`.
+pub fn render_fix_report(file: &Path, report: &FixReport) -> String {
+    let mut out = String::new();
+    if report.applied > 0 {
+        out.push_str(&format!(
+            "{}: applied {} fix(es)\n",
+            file.display(),
+            report.applied
+        ));
+    }
+    for conflict in &report.conflicts {
+        out.push_str(&format!(
+            "{}:{}:{}: [warning] fix conflict -- overlapping fixes from {} were not applied\n",
+            file.display(),
+            conflict.location.line + 1,
+            conflict.location.column + 1,
+            conflict.pattern_ids.join(", ")
+        ));
+    }
+    for (pattern_id, error) in &report.skipped_rules {
+        out.push_str(&format!(
+            "{}: [warning] pattern {pattern_id:?} has an unparsable rule, skipped: {error}\n",
+            file.display()
+        ));
+    }
+    out.push_str(&render_human_readable(file, &report.result));
     out
 }
 
@@ -191,6 +296,7 @@ mod tests {
             Command::Validate {
                 language: "rust".to_string(),
                 json: true,
+                fix: false,
                 files: vec![PathBuf::from("src/main.rs")],
             }
         );
@@ -215,6 +321,7 @@ mod tests {
             Command::Validate {
                 language: "rust".to_string(),
                 json: true,
+                fix: false,
                 files: vec![
                     PathBuf::from("src/a.rs"),
                     PathBuf::from("src/b.rs"),
@@ -419,6 +526,7 @@ rule:
                     location: location.clone(),
                     matched_text: "impl Config { pub fn new() -> Config { Config } }".to_string(),
                     message: "d".to_string(),
+                    suggested_fix: None,
                 },
                 PatternViolation {
                     pattern_id: "observer-presence-rust".to_string(),
@@ -428,6 +536,7 @@ rule:
                     matched_text: "struct Publisher { observers: Vec<Box<dyn Observer>> }"
                         .to_string(),
                     message: "d".to_string(),
+                    suggested_fix: None,
                 },
             ],
             passed: false,
@@ -440,6 +549,194 @@ rule:
         assert!(
             rendered.contains("1 violation(s) (1 informational), score 0.50"),
             "unexpected summary line, got: {rendered}"
+        );
+    }
+
+    // --- fix_files / render_fix_report (TF-890) ----------------------------
+
+    const RUST_UNWRAP_WITH_FIX: &str = r#"
+id: no-unwrap-rust
+message: Avoid unwrap() in production code
+severity: warning
+language: Rust
+rule:
+  pattern: $EXPR.unwrap()
+fix: $EXPR.expect("TODO")
+"#;
+
+    fn rust_unwrap_pattern() -> Pattern {
+        let now = chrono::Utc::now();
+        Pattern::from_rule(
+            "No Unwrap".to_string(),
+            "d".to_string(),
+            None,
+            RUST_UNWRAP_WITH_FIX.to_string(),
+            true,
+            now,
+            now,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn parses_validate_with_the_fix_flag() {
+        let cli = Cli::parse_from([
+            "norma",
+            "validate",
+            "--language",
+            "rust",
+            "--fix",
+            "src/main.rs",
+        ]);
+        assert_eq!(
+            cli.command,
+            Command::Validate {
+                language: "rust".to_string(),
+                json: false,
+                fix: true,
+                files: vec![PathBuf::from("src/main.rs")],
+            }
+        );
+    }
+
+    #[test]
+    fn fix_files_rewrites_the_file_in_place_and_reports_what_remains() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("has_unwrap.rs");
+        std::fs::write(&file, "fn main() { value.unwrap(); }").unwrap();
+
+        let reports = fix_files(
+            std::slice::from_ref(&file),
+            "rust",
+            &[rust_unwrap_pattern()],
+        )
+        .unwrap();
+
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].applied, 1);
+        assert!(reports[0].conflicts.is_empty());
+        assert!(
+            reports[0].result.passed,
+            "the just-applied fix must leave nothing outstanding"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            r#"fn main() { value.expect("TODO"); }"#
+        );
+    }
+
+    #[test]
+    fn fix_files_does_not_touch_a_file_with_nothing_to_fix() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("clean.rs");
+        let original = "fn main() {}";
+        std::fs::write(&file, original).unwrap();
+
+        let reports = fix_files(
+            std::slice::from_ref(&file),
+            "rust",
+            &[rust_unwrap_pattern()],
+        )
+        .unwrap();
+
+        assert_eq!(reports[0].applied, 0);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+    }
+
+    #[test]
+    fn fix_files_reports_a_pattern_whose_stored_rule_no_longer_parses() {
+        use crate::models::Severity;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("has_unwrap.rs");
+        std::fs::write(&file, "fn main() { value.unwrap(); }").unwrap();
+
+        let now = chrono::Utc::now();
+        let broken = Pattern::from_trusted_row(
+            "was-valid-once".to_string(),
+            "Was Valid Once".to_string(),
+            "d".to_string(),
+            None,
+            "rust".to_string(),
+            Severity::Warning,
+            "not: valid: yaml: at: all: -".to_string(),
+            true,
+            now,
+            now,
+        );
+
+        let reports = fix_files(
+            std::slice::from_ref(&file),
+            "rust",
+            &[rust_unwrap_pattern(), broken],
+        )
+        .unwrap();
+
+        // The still-valid pattern is applied normally...
+        assert_eq!(reports[0].applied, 1);
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            r#"fn main() { value.expect("TODO"); }"#
+        );
+        // ...and the broken one is reported, not silently dropped.
+        assert_eq!(reports[0].skipped_rules.len(), 1);
+        assert_eq!(reports[0].skipped_rules[0].0, "was-valid-once");
+
+        let rendered = render_fix_report(&file, &reports[0]);
+        assert!(
+            rendered.contains("\"was-valid-once\" has an unparsable rule, skipped:"),
+            "got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn render_fix_report_shows_applied_count_then_remaining_violations() {
+        let report = FixReport {
+            file: PathBuf::from("src/lib.rs"),
+            applied: 2,
+            conflicts: vec![],
+            skipped_rules: vec![],
+            result: ValidationResult {
+                violations: vec![],
+                passed: true,
+                score: 1.0,
+                checked_patterns: 1,
+                duration_ms: 1,
+            },
+        };
+        let rendered = render_fix_report(Path::new("src/lib.rs"), &report);
+        assert!(rendered.contains("applied 2 fix(es)"), "got: {rendered}");
+        assert!(rendered.contains("no violations"), "got: {rendered}");
+    }
+
+    #[test]
+    fn render_fix_report_surfaces_a_conflict_as_a_warning_line() {
+        use crate::models::{CodeLocation, FixConflict};
+
+        let report = FixReport {
+            file: PathBuf::from("src/lib.rs"),
+            applied: 0,
+            conflicts: vec![FixConflict {
+                pattern_ids: vec!["a".to_string(), "b".to_string()],
+                location: CodeLocation {
+                    file: None,
+                    line: 4,
+                    column: 2,
+                },
+            }],
+            skipped_rules: vec![],
+            result: ValidationResult {
+                violations: vec![],
+                passed: true,
+                score: 1.0,
+                checked_patterns: 2,
+                duration_ms: 1,
+            },
+        };
+        let rendered = render_fix_report(Path::new("src/lib.rs"), &report);
+        assert!(
+            rendered.contains("src/lib.rs:5:3: [warning] fix conflict -- overlapping fixes from a, b were not applied"),
+            "got: {rendered}"
         );
     }
 }
