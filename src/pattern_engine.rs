@@ -156,8 +156,10 @@ impl Pattern {
 /// Takes `pattern_id`/`pattern_name`/`severity`/`message` as plain values
 /// rather than a `&Pattern` so this also serves `test_rule`, which has no
 /// registered `Pattern` to read them from (TF-891) -- `validate`, below,
-/// passes a real pattern's fields; `test_rule` passes the rule's own `id`
-/// and `message` in their place.
+/// passes a real pattern's catalog fields (`pattern.id()`, `pattern.name`,
+/// `pattern.description`); `test_rule` has no catalog name or description
+/// to pass, so it passes the rule's own `id` for *both* `pattern_id` and
+/// `pattern_name`, and the rule's own `message` in place of a description.
 fn find_violations(
     pattern_id: &str,
     pattern_name: &str,
@@ -212,6 +214,39 @@ fn coverage_warning(pattern_id: &str, pattern_name: &str, message: String) -> Pa
     }
 }
 
+/// The real hit rate: 1.0 minus the fraction of `checked_patterns` that
+/// produced at least a warning/error-severity match, clamped to never go
+/// negative (a single pattern matching more than once would otherwise push
+/// the naive ratio below zero). Only warning/error-severity matches count
+/// against it -- an info/hint/off match (e.g. the purely informational
+/// `observer-presence-*` pattern) is still visible in `violations`, but
+/// finding one isn't a defect, so it must not make the score worse.
+///
+/// Shared by `validate` and `test_rule` so the formula can't drift between
+/// them (TF-891) -- `validate` calls this on the matches alone, before any
+/// synthetic coverage warning is appended (see its call site's comment for
+/// why), while `test_rule` has no coverage warnings to worry about.
+fn score_from(violations: &[PatternViolation], checked_patterns: usize) -> f64 {
+    if checked_patterns == 0 {
+        return 0.0;
+    }
+    let scoring_matches = violations
+        .iter()
+        .filter(|v| matches!(v.severity, Severity::Warning | Severity::Error))
+        .count();
+    (1.0 - scoring_matches as f64 / checked_patterns as f64).max(0.0)
+}
+
+/// Whether `violations` contains at least one warning/error-severity entry
+/// -- mirrors `score_from`'s severity filter (an info/hint/off-only result
+/// still passes). Shared with `test_rule` for the same reason `score_from`
+/// is.
+fn passed_from(violations: &[PatternViolation]) -> bool {
+    !violations
+        .iter()
+        .any(|v| matches!(v.severity, Severity::Warning | Severity::Error))
+}
+
 /// Runs every enabled pattern whose `language` matches `language` against
 /// `source`, and aggregates the result. Shared by the MCP
 /// `validate_pattern_compliance` tool (`mcp_server.rs`) and the `norma
@@ -263,22 +298,10 @@ pub fn validate(
         }
     }
 
-    // Score is the real hit rate: computed before any synthetic coverage
-    // warning is appended below, so it never divides by patterns that
-    // never actually ran. Only warning/error-severity matches count
-    // against the score -- an info/hint/off match (e.g. the purely
-    // informational `observer-presence-*` pattern) is still visible in
-    // `violations` below, but finding one isn't a defect, so it must not
-    // make the score worse.
-    let scoring_matches = violations
-        .iter()
-        .filter(|v| matches!(v.severity, Severity::Warning | Severity::Error))
-        .count();
-    let score = if checked_patterns == 0 {
-        0.0
-    } else {
-        (1.0 - scoring_matches as f64 / checked_patterns as f64).max(0.0)
-    };
+    // `score_from` runs on the matches alone, before any synthetic coverage
+    // warning is appended below, so it never divides by patterns that never
+    // actually ran.
+    let score = score_from(&violations, checked_patterns);
 
     for (pattern_id, err) in &skipped {
         violations.push(coverage_warning(
@@ -297,13 +320,11 @@ pub fn validate(
         ));
     }
 
-    // `passed` mirrors `score`'s severity filter, checked after the
-    // synthetic coverage warnings above (also Warning-severity) are folded
-    // into `violations` -- degraded coverage must still fail a run exactly
-    // as before.
-    let passed = !violations
-        .iter()
-        .any(|v| matches!(v.severity, Severity::Warning | Severity::Error));
+    // `passed_from` mirrors `score_from`'s severity filter, checked after
+    // the synthetic coverage warnings above (also Warning-severity) are
+    // folded into `violations` -- degraded coverage must still fail a run
+    // exactly as before.
+    let passed = passed_from(&violations);
     Ok(ValidationResult {
         violations,
         passed,
@@ -320,19 +341,24 @@ pub fn validate(
 /// closing the gap the README's "Adopting an existing ast-grep rule" section
 /// used to describe as a workaround (register first, then validate).
 ///
-/// A true dry run of `register_pattern`: applies the exact same structural
-/// checks `Pattern::from_rule` does (non-empty `id`, a language norma
-/// supports) via `check_registerable`, so a rule this accepts is guaranteed
-/// to also be accepted by `register_pattern` -- and one it rejects would
-/// have failed there too, just after already being written to disk.
+/// Applies the exact same structural checks `Pattern::from_rule` does
+/// (non-empty `id`, a language norma supports) via `check_registerable`,
+/// so a rule this accepts is guaranteed to also be accepted by
+/// `register_pattern`, and one it rejects would be rejected there too --
+/// before ever reaching storage in either case (`register_pattern` runs
+/// those same checks up front and never writes to SQLite on failure, see
+/// `PatternStore::register_pattern`'s doc comment). What this *doesn't*
+/// cover: if `rule_yaml`'s `id` collides with an already-registered
+/// pattern, `register_pattern` will silently overwrite it -- `test_rule`
+/// never looks at the store, so it can't warn about that.
 ///
 /// Reuses `find_violations`, so a `fix:` in `rule_yaml` populates
 /// `suggested_fix` exactly like `validate_pattern_compliance` does -- same
 /// result shape, just for one ad-hoc rule instead of a whole language's
 /// registered catalog. There is no catalog `Pattern` yet to read a name or
-/// description from, so both `pattern_id`/`pattern_name` on each violation
-/// come from the rule's own `id`, and `message` comes from the rule's own
-/// `message` field rather than a catalog `description`.
+/// description from, so both `pattern_id` and `pattern_name` on each
+/// violation come from the rule's own `id`, and `message` comes from the
+/// rule's own `message` field rather than a catalog `description`.
 pub fn test_rule(rule_yaml: &str, source: &str) -> anyhow::Result<ValidationResult> {
     let start = Instant::now();
     let config = parse_rule(rule_yaml)?;
@@ -349,16 +375,15 @@ pub fn test_rule(rule_yaml: &str, source: &str) -> anyhow::Result<ValidationResu
 
     // Exactly one rule is ever checked here -- unlike `validate`, above,
     // `checked_patterns` can never legitimately be 0: `check_registerable`
-    // already returned early if the rule itself couldn't be run.
+    // already returned early if the rule itself couldn't be run. No
+    // coverage warnings apply either (those are `validate`'s "zero
+    // patterns registered"/"pattern failed to parse" concerns, neither of
+    // which exists for one already-parsed, already-checked rule), so
+    // `score_from`/`passed_from` run on `violations` as-is, unlike
+    // `validate`'s two-phase before/after-coverage-warnings split.
     let checked_patterns = 1;
-    let scoring_matches = violations
-        .iter()
-        .filter(|v| matches!(v.severity, Severity::Warning | Severity::Error))
-        .count();
-    let score = (1.0 - scoring_matches as f64 / checked_patterns as f64).max(0.0);
-    let passed = !violations
-        .iter()
-        .any(|v| matches!(v.severity, Severity::Warning | Severity::Error));
+    let score = score_from(&violations, checked_patterns);
+    let passed = passed_from(&violations);
 
     Ok(ValidationResult {
         violations,
@@ -883,6 +908,44 @@ fix: $EXPR.expect("TODO")
         assert!(result.violations.is_empty());
         assert!(result.passed);
         assert_eq!(result.score, 1.0);
+        assert_eq!(result.checked_patterns, 1);
+    }
+
+    /// Mirrors `validate_info_severity_match_is_visible_but_does_not_fail_the_run`
+    /// -- `test_rule` shares `score_from`/`passed_from` with `validate`, but
+    /// that sharing is only worth anything if both sides are actually
+    /// exercised.
+    #[test]
+    fn test_rule_info_severity_match_is_visible_but_does_not_fail_the_run() {
+        let source = "struct Publisher { observers: Vec<Box<dyn Observer>> }";
+        let result = test_rule(RUST_OBSERVER_PRESENCE_INFO, source).unwrap();
+        assert_eq!(
+            result.violations.len(),
+            1,
+            "the match must still be visible"
+        );
+        assert_eq!(result.violations[0].severity, Severity::Info);
+        assert!(
+            result.passed,
+            "an info-severity match must not fail the run"
+        );
+        assert_eq!(
+            result.score, 1.0,
+            "an info-severity match must not lower the score"
+        );
+    }
+
+    /// Mirrors `validate_score_never_goes_negative_when_one_pattern_matches_many_times`.
+    /// `test_rule` reaches the same clamp far more easily than `validate`
+    /// does, since `checked_patterns` is always 1 -- two matches already
+    /// drive the naive ratio negative, not several checked patterns' worth.
+    #[test]
+    fn test_rule_score_never_goes_negative_when_the_rule_matches_many_times() {
+        let source = "fn main() { println!(\"a\"); println!(\"b\"); println!(\"c\"); }";
+        let result = test_rule(RUST_NO_DEBUG_PRINT, source).unwrap();
+        assert_eq!(result.checked_patterns, 1);
+        assert_eq!(result.violations.len(), 3);
+        assert_eq!(result.score, 0.0);
     }
 
     #[test]
@@ -919,22 +982,40 @@ fix: $EXPR.expect("TODO")
         );
     }
 
-    /// Confirms `test_rule` accepts exactly what `Pattern::from_rule`
-    /// (register_pattern's own validation) would -- the "dry run" property
-    /// TF-891 is built on.
+    /// Confirms `test_rule` and `Pattern::from_rule` (`register_pattern`'s
+    /// own validation) agree on accept/reject for every rule shape the
+    /// other tests in this module already probe individually -- the "dry
+    /// run" property TF-891 is built on. A single hardcoded rule can only
+    /// confirm one of the two ever agree on "accept"; this drives both
+    /// through a valid rule and each of the two known-bad shapes so a
+    /// future divergence (e.g. `check_registerable` and `Pattern::from_rule`
+    /// drifting apart again) would actually be caught here.
     #[test]
-    fn test_rule_accepts_whatever_from_rule_would_accept() {
-        assert!(test_rule(RUST_NO_DEBUG_PRINT, "fn main() {}").is_ok());
-        assert!(Pattern::from_rule(
-            "n".to_string(),
-            "d".to_string(),
-            None,
-            RUST_NO_DEBUG_PRINT.to_string(),
-            true,
-            Utc::now(),
-            Utc::now(),
-        )
-        .is_ok());
+    fn test_rule_and_from_rule_agree_on_every_rule_shape() {
+        fn from_rule_accepts(rule: &str) -> bool {
+            Pattern::from_rule(
+                "n".to_string(),
+                "d".to_string(),
+                None,
+                rule.to_string(),
+                true,
+                Utc::now(),
+                Utc::now(),
+            )
+            .is_ok()
+        }
+
+        for (rule, source) in [
+            (RUST_NO_DEBUG_PRINT, "fn main() {}"),
+            (RULE_WITHOUT_ID, "fn main() {}"),
+            (GO_RULE, "package main"),
+        ] {
+            assert_eq!(
+                test_rule(rule, source).is_ok(),
+                from_rule_accepts(rule),
+                "test_rule and Pattern::from_rule disagree on: {rule}"
+            );
+        }
     }
 
     #[test]

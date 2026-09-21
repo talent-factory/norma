@@ -186,7 +186,11 @@ impl NormaServer {
     /// `validate_pattern_compliance`). Applies the exact same structural
     /// checks `register_pattern` would (non-empty `id`, a language norma
     /// supports -- see `pattern_engine::check_registerable`), so a rule
-    /// this accepts is guaranteed to also be accepted by `register_pattern`.
+    /// this accepts is guaranteed to also be accepted by `register_pattern`,
+    /// and one it rejects would be rejected there too. What this can't see:
+    /// if `rule`'s `id` matches an already-registered pattern,
+    /// `register_pattern` will silently overwrite it -- this tool never
+    /// reads the store, so it has no way to warn about that.
     ///
     /// Deliberately has no `dump_syntax_tree` equivalent: unlike this tool
     /// (which runs the rule through norma's own validation pipeline,
@@ -195,7 +199,7 @@ impl NormaServer {
     /// "norma vs. ast-grep-mcp" README section and
     /// .scratch/ast-grep-feature-parity/issues/02-rule-testing-ast-debug-tooling.md.
     #[tool(
-        description = "Dry-run a candidate ast-grep RuleConfig YAML against example code without registering it -- returns matches (with suggested_fix, if the rule has a fix). For raw AST inspection instead of testing a rule, use ast-grep-mcp's dump_syntax_tree."
+        description = "Dry-run a candidate ast-grep RuleConfig YAML against example code without registering it -- returns matches (with suggested_fix, if the rule has a fix). A match is the expected/successful outcome when a rule is written to catch something, so `passed: false`/a non-empty `violations` list here means \"the rule matched\", not \"something went wrong\". For raw AST inspection instead of testing a rule, use ast-grep-mcp's dump_syntax_tree."
     )]
     pub async fn test_pattern(
         &self,
@@ -316,9 +320,16 @@ mod tests {
     #[tokio::test]
     async fn test_pattern_reports_a_match_without_registering_anything() {
         let server = test_server().await;
+        // Deliberately *not* `no-debug-print-rust` -- that id already
+        // belongs to one of the 20 seeded defaults, and `PatternStore`
+        // upserts on a colliding id (`ON CONFLICT(id) DO UPDATE`). Testing
+        // with that id would leave the pattern count at 20 whether or not
+        // `test_pattern` accidentally persisted its rule, silently
+        // defeating the point of this test. A id no default pattern uses
+        // makes an accidental write actually show up as a 21st row.
         let params = Parameters(TestPatternParams {
             rule: r#"
-id: no-debug-print-rust
+id: no-debug-print-rust-candidate
 message: Avoid println! in production code
 severity: warning
 language: Rust
@@ -334,10 +345,17 @@ rule:
         assert!(!result.passed);
 
         // Nothing was persisted -- the seeded defaults are still the only
-        // registered patterns.
+        // registered patterns, and the real `no-debug-print-rust` default
+        // is untouched.
         let patterns_json = server.list_patterns().await.unwrap();
         let patterns: Vec<Pattern> = serde_json::from_str(&patterns_json).unwrap();
         assert_eq!(patterns.len(), 20);
+        assert!(
+            patterns.iter().any(|p| p.id() == "no-debug-print-rust"
+                && p.name == "No Debug Print"
+                && p.description.contains("tracing")),
+            "the seeded no-debug-print-rust default must be exactly as seeded"
+        );
     }
 
     #[tokio::test]
@@ -398,6 +416,31 @@ rule:
             .expect_err("a rule with no id must be rejected, mirroring register_pattern");
         assert!(
             err.message.contains("non-empty"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pattern_rejects_a_language_norma_does_not_support() {
+        let server = test_server().await;
+        let params = Parameters(TestPatternParams {
+            rule: r#"
+id: no-debug-print-go
+message: Avoid fmt.Println in production code
+severity: warning
+language: Go
+rule:
+  pattern: fmt.Println($$$ARGS)
+"#
+            .to_string(),
+            code: "package main".to_string(),
+        });
+        let err = server
+            .test_pattern(params)
+            .await
+            .expect_err("a Go rule must be rejected, mirroring register_pattern");
+        assert!(
+            err.message.contains("unsupported language"),
             "unexpected error: {err:?}"
         );
     }

@@ -179,7 +179,7 @@ test_pattern(
 )
 ```
 
-`test_pattern` applies the same `id`/`language` checks `register_pattern` does, so a rule it accepts is guaranteed to also be accepted by `register_pattern`. It has no `dump_syntax_tree` equivalent -- for raw AST inspection, use ast-grep-mcp's `dump_syntax_tree` (or the plain `ast-grep` CLI) instead; norma stays complementary to it rather than duplicating it.
+`test_pattern` applies the same `id`/`language` checks `register_pattern` does, so a rule it accepts is guaranteed to also be accepted by `register_pattern`, and one it rejects would be rejected there too -- before ever reaching storage in either case. It never reads the pattern store, though, so it can't warn you if `rule`'s `id` happens to collide with an already-registered pattern; `register_pattern` will overwrite that pattern silently, same as it always has. It also has no `dump_syntax_tree` equivalent -- for raw AST inspection, use ast-grep-mcp's `dump_syntax_tree` (or the plain `ast-grep` CLI) instead; norma stays complementary to it rather than duplicating it.
 
 ## 🔧 Development
 
