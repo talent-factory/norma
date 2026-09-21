@@ -13,13 +13,17 @@ use std::sync::Arc;
 pub struct ValidateParams {
     /// Source code to validate.
     pub code: String,
-    /// norma's canonical language key: "java" | "python" | "rust" | "typescript".
+    /// norma's canonical language key (or any ast-grep alias, e.g. "rs"
+    /// for Rust) -- see `pattern_engine::resolve_language`. Any of the 28
+    /// languages ast-grep-language supports is accepted, though norma
+    /// currently ships default patterns for only "java", "python",
+    /// "rust", and "typescript".
     pub language: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct LanguageParams {
-    /// norma's canonical language key: "java" | "python" | "rust" | "typescript".
+    /// norma's canonical language key -- see `ValidateParams::language`.
     pub language: String,
 }
 
@@ -301,9 +305,12 @@ mod tests {
     #[tokio::test]
     async fn validate_pattern_compliance_rejects_an_unsupported_language() {
         let server = test_server().await;
+        // "cobol" (not "go"): since TF-893 every real ast-grep language is
+        // registrable, including Go -- only a language ast-grep itself
+        // doesn't know about is rejected here.
         let params = Parameters(ValidateParams {
             code: "package main".to_string(),
-            language: "go".to_string(),
+            language: "cobol".to_string(),
         });
         let err = server
             .validate_pattern_compliance(params)
@@ -423,25 +430,28 @@ rule:
     #[tokio::test]
     async fn test_pattern_rejects_a_language_norma_does_not_support() {
         let server = test_server().await;
+        // "Cobol", not "Go": since TF-893 a Go rule is now accepted (see
+        // pattern_engine::from_rule_accepts_a_previously_unsupported_language) --
+        // only a language ast-grep itself doesn't know fails to parse.
         let params = Parameters(TestPatternParams {
             rule: r#"
-id: no-debug-print-go
-message: Avoid fmt.Println in production code
+id: no-debug-print-cobol
+message: Avoid DISPLAY in production code
 severity: warning
-language: Go
+language: Cobol
 rule:
-  pattern: fmt.Println($$$ARGS)
+  pattern: DISPLAY $$$ARGS
 "#
             .to_string(),
-            code: "package main".to_string(),
+            code: "PROGRAM-ID. MAIN.".to_string(),
         });
         let err = server
             .test_pattern(params)
             .await
-            .expect_err("a Go rule must be rejected, mirroring register_pattern");
+            .expect_err("a rule for a language ast-grep doesn't support must be rejected");
         assert!(
-            err.message.contains("unsupported language"),
-            "unexpected error: {err:?}"
+            !err.message.is_empty(),
+            "expected a parse error, got: {err:?}"
         );
     }
 
@@ -545,9 +555,10 @@ fix: $EXPR.expect("TODO")
     #[tokio::test]
     async fn apply_pattern_fix_rejects_an_unsupported_language() {
         let server = test_server().await;
+        // "cobol", not "go" -- see validate_pattern_compliance_rejects_an_unsupported_language.
         let params = Parameters(ValidateParams {
             code: "package main".to_string(),
-            language: "go".to_string(),
+            language: "cobol".to_string(),
         });
         let err = server
             .apply_pattern_fix(params)

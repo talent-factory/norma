@@ -25,6 +25,12 @@ pub enum Command {
     /// Validate one or more files against the patterns registered for
     /// their language.
     Validate {
+        /// Canonical language key, or any ast-grep alias (e.g. "rs" for
+        /// Rust) -- see `pattern_engine::resolve_language`. Accepts any of
+        /// the 28 languages ast-grep-language supports; norma currently
+        /// ships default patterns for only Java, Python, Rust, and
+        /// TypeScript (see docs/adr/0002.md), so the other 24 are
+        /// registrable but have no patterns to check out of the box.
         #[arg(long)]
         language: String,
         /// Print machine-readable JSON instead of human-readable text.

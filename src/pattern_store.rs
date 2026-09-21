@@ -270,6 +270,9 @@ rule:
         assert!(store.list_all_patterns().await.unwrap().is_empty());
     }
 
+    // Go is one of the 24 languages TF-893 unlocked -- previously
+    // rejected by `register_pattern`, now stored like any other language
+    // (just without shipped default patterns; see `default_patterns.rs`).
     const GO_RULE: &str = r#"
 id: no-debug-print-go
 message: Avoid fmt.Println in production code
@@ -279,22 +282,49 @@ rule:
   pattern: fmt.Println($$$ARGS)
 "#;
 
+    // Cobol isn't one of the 28 `SupportLang` variants ast-grep-language
+    // ships -- no version of norma has ever supported it.
+    const COBOL_RULE: &str = r#"
+id: no-debug-print-cobol
+message: Avoid DISPLAY in production code
+severity: warning
+language: Cobol
+rule:
+  pattern: DISPLAY $$$ARGS
+"#;
+
     #[tokio::test]
-    async fn register_pattern_rejects_a_language_norma_does_not_support() {
+    async fn register_pattern_accepts_a_previously_unsupported_language() {
         let store = test_store().await;
-        let result = store
+        let pattern = store
             .register_pattern(
                 "No Debug Print".to_string(),
                 "fmt.Println left in production code".to_string(),
                 None,
                 GO_RULE.to_string(),
             )
+            .await
+            .expect("a Go pattern must now be stored");
+        assert_eq!(pattern.language(), "go");
+        assert_eq!(store.list_all_patterns().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn register_pattern_rejects_a_language_ast_grep_does_not_support() {
+        let store = test_store().await;
+        let result = store
+            .register_pattern(
+                "No Debug Print".to_string(),
+                "DISPLAY left in production code".to_string(),
+                None,
+                COBOL_RULE.to_string(),
+            )
             .await;
-        let err = result.expect_err("a Go pattern must be rejected, not stored");
-        assert!(
-            err.to_string().contains("unsupported language"),
-            "unexpected error: {err}"
-        );
+        // See pattern_engine::from_rule_rejects_a_language_ast_grep_does_not_support
+        // for why this doesn't assert on a specific message: it fails
+        // inside YAML deserialization, before norma's own
+        // "unsupported language" check ever runs.
+        result.expect_err("a Cobol pattern must be rejected, not stored");
         // Nothing should have been written -- in particular no row tagged
         // with a placeholder language that no lookup could ever reach.
         assert!(store.list_all_patterns().await.unwrap().is_empty());
