@@ -2,7 +2,7 @@
 name = "norma"
 version = "0.1.0"
 edition = "2021"
-authors = ["Talent Factory GmbH <daniel@talentfactory.ch>"]
+authors = ["Talent Factory GmbH <daniel.senften@talent-factory.ch>"]
 description = "Developer-grade code pattern enforcement everywhere you code"
 repository = "https://github.com/talent-factory/norma"
 license = "MIT OR Apache-2.0"

@@ -243,7 +243,7 @@ Contributions welcome! Please:
 ## 📞 Contact
 
 - **Talent Factory GmbH** — https://github.com/talent-factory
-- **Maintainer** — Daniel (daniel@talentfactory.ch)
+- **Maintainer** — Daniel (daniel.senften@talent-factory.ch)
 
 ---
 
