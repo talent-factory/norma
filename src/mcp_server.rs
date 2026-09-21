@@ -1,4 +1,4 @@
-use crate::models::ValidationResult;
+use crate::models::{Pattern, ValidationResult};
 use crate::pattern_engine;
 use crate::pattern_store::{PatternStore, RegisterPatternError};
 use rmcp::{
@@ -6,7 +6,7 @@ use rmcp::{
     ErrorData, ServerHandler, ServiceExt,
 };
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -25,6 +25,30 @@ pub struct ValidateParams {
 pub struct LanguageParams {
     /// norma's canonical language key -- see `ValidateParams::language`.
     pub language: String,
+}
+
+/// `get_pattern_checklist`'s response. Not a bare `Vec<Pattern>`: since
+/// TF-893 made 24 languages registrable with no default patterns of their
+/// own (see `pattern_engine::language_key`), an empty `patterns` list is
+/// now the *normal* response for most of norma's 28 supported languages,
+/// not just an edge case -- indistinguishable, as a bare array, from "this
+/// language is covered and you're compliant". `coverage_warning` makes
+/// that distinction explicit, the same one
+/// `pattern_engine::NO_COVERAGE_PATTERN_ID` exists to preserve for
+/// `validate_pattern_compliance`/`apply_pattern_fix`. A `Pattern` can't
+/// carry a synthetic no-coverage entry the way a `PatternViolation` can
+/// (see `Pattern::from_rule`'s doc comment on why one can't be
+/// constructed with an arbitrary id) -- hence a sibling field instead.
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
+pub struct PatternChecklist {
+    /// Every enabled pattern registered for the requested language.
+    pub patterns: Vec<Pattern>,
+    /// Set only when `patterns` is empty, naming the language that has no
+    /// enabled patterns registered. Absent (not `null`) whenever
+    /// `patterns` is non-empty.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coverage_warning: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -179,7 +203,9 @@ impl NormaServer {
         to_json(&result)
     }
 
-    #[tool(description = "List the patterns that apply to a given language")]
+    #[tool(
+        description = "List the patterns that apply to a given language. An empty `patterns` list carries a `coverage_warning` explaining why -- e.g. one of the 24 languages TF-893 made registrable but that has no default patterns yet -- so it isn't mistaken for \"this language is covered and you're compliant\"."
+    )]
     pub async fn get_pattern_checklist(
         &self,
         Parameters(params): Parameters<LanguageParams>,
@@ -191,7 +217,13 @@ impl NormaServer {
             .get_patterns_for_language(language)
             .await
             .map_err(to_tool_error)?;
-        to_json(&patterns)
+        let coverage_warning = patterns
+            .is_empty()
+            .then(|| format!("no enabled patterns are registered for language {language:?}"));
+        to_json(&PatternChecklist {
+            patterns,
+            coverage_warning,
+        })
     }
 
     /// Dry-runs a candidate rule against example code without registering
@@ -311,6 +343,62 @@ mod tests {
         let json = server.list_patterns().await.unwrap();
         let patterns: Vec<Pattern> = serde_json::from_str(&json).unwrap();
         assert_eq!(patterns.len(), 20);
+    }
+
+    #[tokio::test]
+    async fn get_pattern_checklist_returns_patterns_for_a_covered_language() {
+        let server = test_server().await;
+        let params = Parameters(LanguageParams {
+            language: "rust".to_string(),
+        });
+        let json = server.get_pattern_checklist(params).await.unwrap();
+        let checklist: PatternChecklist = serde_json::from_str(&json).unwrap();
+        assert_eq!(checklist.patterns.len(), 5);
+        assert!(
+            checklist.coverage_warning.is_none(),
+            "a covered language must not carry a coverage_warning"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_pattern_checklist_carries_a_coverage_warning_for_a_pattern_less_language() {
+        // TF-893: "go" is registrable (unlike before) but, like the other
+        // 23 newly-unlocked languages, ships no default patterns -- so
+        // this is the common case for those languages, not an edge case.
+        // Without `coverage_warning`, an empty `patterns` array here would
+        // be indistinguishable from "go is covered and fully compliant",
+        // exactly the ambiguity `pattern_engine::NO_COVERAGE_PATTERN_ID`
+        // exists to prevent for `validate_pattern_compliance`.
+        let server = test_server().await;
+        let params = Parameters(LanguageParams {
+            language: "go".to_string(),
+        });
+        let json = server.get_pattern_checklist(params).await.unwrap();
+        let checklist: PatternChecklist = serde_json::from_str(&json).unwrap();
+        assert!(checklist.patterns.is_empty());
+        let warning = checklist
+            .coverage_warning
+            .expect("an empty checklist must carry a coverage_warning");
+        assert!(
+            warning.contains("go"),
+            "expected the coverage_warning to name the language, got: {warning}"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_pattern_checklist_rejects_an_unsupported_language() {
+        let server = test_server().await;
+        let params = Parameters(LanguageParams {
+            language: "cobol".to_string(),
+        });
+        let err = server
+            .get_pattern_checklist(params)
+            .await
+            .expect_err("an unsupported language must be rejected, not report zero coverage");
+        assert!(
+            err.message.contains("unsupported language"),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[tokio::test]

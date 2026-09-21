@@ -170,7 +170,11 @@ This opens a local web UI. From there:
    `{"code": "fn main() { println!(\"debug\"); }", "language": "rust"}`
    -- expect one violation.
 4. Call **`get_pattern_checklist`** with `{"language": "python"}` --
-   expect only Python-language patterns.
+   expect `{"patterns": [...]}` with only Python-language patterns and no
+   `coverage_warning` field. Then call it again with `{"language": "go"}`
+   (registrable since TF-893, but shipped with no default patterns) --
+   expect `{"patterns": [], "coverage_warning": "no enabled patterns are
+   registered for language \"go\""}`, not a bare empty array.
 5. Call **`register_pattern`** with a deliberately broken `rule` (e.g.
    `{"name": "Broken", "description": "d", "rule": "not: valid: yaml"}`)
    -- expect an error response, not a silently accepted pattern (check
