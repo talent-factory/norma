@@ -321,10 +321,17 @@ rule:
             )
             .await;
         // See pattern_engine::from_rule_rejects_a_language_ast_grep_does_not_support
-        // for why this doesn't assert on a specific message: it fails
-        // inside YAML deserialization, before norma's own
-        // "unsupported language" check ever runs.
-        result.expect_err("a Cobol pattern must be rejected, not stored");
+        // for why this asserts on `{err:?}` (RegisterPatternError's
+        // derived Debug, which renders the wrapped anyhow::Error's own
+        // chain) rather than norma's own "unsupported language" text: the
+        // failure happens inside YAML deserialization, before that check
+        // ever runs.
+        let err = result.expect_err("a Cobol pattern must be rejected, not stored");
+        let chain = format!("{err:?}");
+        assert!(
+            chain.contains("Cobol"),
+            "expected the error chain to name the rejected language, got: {chain}"
+        );
         // Nothing should have been written -- in particular no row tagged
         // with a placeholder language that no lookup could ever reach.
         assert!(store.list_all_patterns().await.unwrap().is_empty());

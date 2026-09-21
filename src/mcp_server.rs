@@ -80,17 +80,28 @@ fn optional_string_schema(_generator: &mut schemars::SchemaGenerator) -> schemar
 /// without this, every failure here -- a SQLite I/O error, a corrupted row
 /// -- was visible only inside the one JSON-RPC error response sent back to
 /// the client, with no local trail to diagnose a recurring problem from.
-fn to_tool_error(err: impl std::fmt::Display) -> ErrorData {
-    tracing::error!(error = %err, "MCP tool call failed");
-    ErrorData::internal_error(err.to_string(), None)
+///
+/// Formats `err` with `{:?}` (its full source chain), not `{}`
+/// (top-level message only), in both the log line and the response sent
+/// to the client: an `anyhow::Error` with a source -- e.g. a `RuleConfig`
+/// YAML that fails to deserialize because its `language:` isn't one of
+/// the 28 `SupportLang` values ast-grep-language knows -- has all of the
+/// actually-useful detail (`"language: Cobol is not supported!"`) one
+/// level down in that chain; `{}` prints only the generic top-level
+/// wrapper message ("Fail to parse yaml as RuleConfig"), leaving both the
+/// client and the operator with no way to tell what was actually wrong.
+fn to_tool_error(err: impl std::fmt::Debug) -> ErrorData {
+    tracing::error!(error = ?err, "MCP tool call failed");
+    ErrorData::internal_error(format!("{err:?}"), None)
 }
 
 /// Maps a client-caused failure (bad input) to an MCP `invalid_params`,
 /// logging it at `warn` rather than `error` -- this is an expected
-/// response to bad input, not a server fault.
-fn to_invalid_params(err: impl std::fmt::Display) -> ErrorData {
-    tracing::warn!(error = %err, "MCP tool call rejected invalid input");
-    ErrorData::invalid_params(err.to_string(), None)
+/// response to bad input, not a server fault. See `to_tool_error`'s doc
+/// comment for why this formats `err` with `{:?}` rather than `{}`.
+fn to_invalid_params(err: impl std::fmt::Debug) -> ErrorData {
+    tracing::warn!(error = ?err, "MCP tool call rejected invalid input");
+    ErrorData::invalid_params(format!("{err:?}"), None)
 }
 
 fn to_json(value: &impl serde::Serialize) -> Result<String, ErrorData> {
@@ -449,9 +460,13 @@ rule:
             .test_pattern(params)
             .await
             .expect_err("a rule for a language ast-grep doesn't support must be rejected");
+        // `to_invalid_params` formats with `{:?}` (the full anyhow chain),
+        // not `{}`, specifically so this -- the actually useful detail --
+        // reaches the client instead of just "Fail to parse yaml as
+        // RuleConfig". See `to_tool_error`'s doc comment.
         assert!(
-            !err.message.is_empty(),
-            "expected a parse error, got: {err:?}"
+            err.message.contains("Cobol"),
+            "expected the error to name the rejected language, got: {err:?}"
         );
     }
 
