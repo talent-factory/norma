@@ -19,6 +19,7 @@ Eine Spec: eine geprüfte, entschiedene Liste (adopt/defer/reject) von ast-grep-
 - [Regel-Testing/AST-Debug-Tooling](issues/02-rule-testing-ast-debug-tooling.md) — Adopt (eingeschränkt): neues Tool `test_pattern(rule, code)`, nichts gespeichert, liefert auch `suggested_fix`. Kein `dump_syntax_tree`-Äquivalent (reiner Klon von `ast-grep-mcp` ohne norma-Mehrwert). → [TF-891](https://linear.app/talent-factory/issue/TF-891).
 - [Sprachabdeckung erweitern](issues/03-language-coverage-expansion.md) — Adopt: alle 28 `SupportLang`-Sprachen generisch für die Registrierung freischalten (aus `SupportLang::all_langs()` abgeleitet, nicht hartcodiert). Neue Sprachen bleiben ohne eingebaute Default-Patterns. → [TF-893](https://linear.app/talent-factory/issue/TF-893).
 - [Bulk-Import bestehender Regeln](issues/04-bulk-import-existing-rules.md) — Adopt: MCP-Tool `import_rules(yaml, category?)` (Multi-Dokument-YAML-String) + CLI `norma import <dir>`. `name`/`description` aus `id`/`message`, erbt bestehendes Upsert-Verhalten, überspringt kaputte Dateien mit Warnung statt abzubrechen. → [TF-894](https://linear.app/talent-factory/issue/TF-894).
+- [Ad-hoc/ephemeres Pattern-Suchen](issues/05-adhoc-ephemeral-search.md) — Reject: reine Redundanz zu `ast-grep-mcp`s `find_code`/`find_code_by_rule`, kein norma-eigener Anwendungsfall. Kein Linear-Ticket.
 
 ## Not yet specified
 
@@ -29,3 +30,8 @@ Eine Spec: eine geprüfte, entschiedene Liste (adopt/defer/reject) von ast-grep-
 - `ast-grep lsp` (Editor-Language-Server) — anderes Einsatzmodell als norma's MCP/CLI-Ansatz
 - `ast-grep new` (Projekt-Scaffolding) — kein Analogon in norma's Domäne
 - `sgconfig.yaml`-Custom-Language-dylib-Loading — Nischenfall, kein erkennbarer Bedarf
+- Ad-hoc/ephemeres Pattern-Suchen (siehe [Ticket](issues/05-adhoc-ephemeral-search.md)) — reine Redundanz zu `ast-grep-mcp`s `find_code`/`find_code_by_rule`; für diesen Bedarf auf `ast-grep-mcp` verweisen statt selbst nachzubauen
+
+## Status
+
+**Alle 5 Tickets resolved, Frontier leer — Destination erreicht.** 4 von 5 Kandidaten adopted und als Linear-Issues graduiert (TF-890 bis TF-894, siehe "Decisions so far"); einer (Ad-hoc-Suche) rejected. Diese Map ist abgeschlossen.
