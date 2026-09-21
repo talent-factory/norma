@@ -191,11 +191,14 @@ pub struct ValidationResult {
     pub duration_ms: u128,
 }
 
-/// A cluster of two or more matching patterns' fix ranges that overlap on
+/// A cluster of two or more different patterns' fix ranges that overlap on
 /// the same code -- see `pattern_engine::apply_fixes`. `location.file` is
-/// always `None` here: `apply_fixes` only ever sees `code: String`, never a
-/// path (the same asymmetry `CodeLocation` itself documents); a caller with
-/// a real path (`cli::fix_files`) attaches it when rendering.
+/// always `None` here and nothing currently populates it: `apply_fixes`
+/// only ever sees `code: String`, never a path, and unlike
+/// `PatternViolation.location` there is no later step that attaches one --
+/// `cli::fix_files`/`render_fix_report` thread the real file path
+/// separately (as their own `file: &Path` argument) rather than filling in
+/// this field.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FixConflict {
     pub pattern_ids: Vec<String>,
@@ -217,6 +220,11 @@ pub struct FixResult {
     /// overlapping fix ranges is applied, rather than guessing a winner --
     /// see `pattern_engine::apply_fixes`'s doc comment.
     pub conflicts: Vec<FixConflict>,
+    /// `(pattern_id, parse error)` for every enabled pattern whose stored
+    /// `rule` no longer parses -- these were skipped, not silently
+    /// dropped. Distinct from a pattern with no `fix:` at all, which is
+    /// expected and never appears here.
+    pub skipped_rules: Vec<(String, String)>,
 }
 
 #[cfg(test)]

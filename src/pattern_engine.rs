@@ -303,18 +303,34 @@ struct FixEdit {
 /// filesystem) -- see TF-890's per-surface split, mirroring `validate`
 /// above (docs/adr/0001.md: one core).
 ///
-/// A pattern without a `fix:`, or whose stored `rule` no longer parses, is
-/// silently skipped here -- `validate`'s `suggested_fix: None` / coverage
-/// warning already surfaces those; `apply_fixes` only ever reports on
-/// fixes it could have applied.
+/// A pattern without a `fix:` is silently skipped here -- `validate`'s
+/// `suggested_fix: None` already surfaces that, and it isn't a defect.
+/// A pattern whose stored `rule` no longer parses is also skipped, but
+/// *not* silently: it's logged and returned in `FixResult.skipped_rules`,
+/// exactly like `validate`'s `coverage_warning` handling for the same
+/// failure -- a caller (in particular the MCP `apply_pattern_fix` tool,
+/// which has no second `validate` call surfacing this the way
+/// `cli::fix_files` does) must be able to tell "nothing needed fixing"
+/// from "some of this was never even attempted".
+///
+/// A single pattern that matches at more than one nesting level of the
+/// same construct (e.g. `$EXPR.unwrap()` against `a.unwrap().unwrap()`,
+/// matching both the outer call and, inside it, the inner one) is *not*
+/// treated as two patterns disagreeing: only the outermost match per
+/// nesting chain is kept, exactly as ast-grep's own rewrite tooling
+/// resolves this. The dropped inner match still shows up as its own
+/// `PatternViolation` via `find_violations`/`validate`, so a second
+/// `--fix` pass converges on it once the outer rewrite has landed.
 ///
 /// When two matches' fix ranges overlap (including one nested inside the
-/// other), *neither* is applied: the whole cluster is dropped and reported
-/// as a single `FixConflict` instead. Fail-safe over guessing a winner --
-/// see docs/adr's TF-890 decision. A cluster is detected by a standard
-/// sweep-line interval merge (sort by start, track the running max end),
-/// so a chain of three or more mutually-touching ranges is one cluster,
-/// not several overlapping pairs.
+/// other) *and* they come from different patterns, *neither* is applied:
+/// the whole cluster is dropped and reported as a single `FixConflict`
+/// instead. Fail-safe over guessing a winner -- see decision point 3 in
+/// `.scratch/ast-grep-feature-parity/issues/01-autofix-rewrite-support.md`
+/// (TF-890). A cluster is detected by a standard sweep-line interval merge
+/// (sort by start, track the running max end), so a chain of three or
+/// more mutually-touching ranges is one cluster, not several overlapping
+/// pairs.
 pub fn apply_fixes(
     source: &str,
     language: &str,
@@ -322,19 +338,40 @@ pub fn apply_fixes(
 ) -> anyhow::Result<FixResult> {
     let language = resolve_language(language)?;
     let mut edits: Vec<FixEdit> = Vec::new();
+    let mut skipped_rules: Vec<(String, String)> = Vec::new();
 
     for pattern in patterns
         .iter()
         .filter(|p| p.enabled && p.language() == language)
     {
-        let Ok(config) = parse_rule(pattern.rule()) else {
-            continue;
+        let config = match parse_rule(pattern.rule()) {
+            Ok(config) => config,
+            Err(err) => {
+                tracing::warn!(pattern_id = %pattern.id(), error = %err, "skipping pattern with unparsable rule");
+                skipped_rules.push((pattern.id().to_string(), err.to_string()));
+                continue;
+            }
         };
         let Some(fixer) = config.fixer.first() else {
             continue;
         };
         let grep = config.language.ast_grep(source);
+        // Matches come back in pre-order (a node before its descendants,
+        // see `SgNode::dfs`), so for one nesting chain the outermost match
+        // is always seen before any match nested inside it -- keeping a
+        // running list of already-kept ranges and skipping anything fully
+        // contained in one is enough to prune self-nested matches down to
+        // just the outermost, per the doc comment above.
+        let mut kept_ranges: Vec<std::ops::Range<usize>> = Vec::new();
         for node_match in grep.root().find_all(&config.matcher) {
+            let range = node_match.range();
+            if kept_ranges
+                .iter()
+                .any(|r| r.start <= range.start && range.end <= r.end)
+            {
+                continue;
+            }
+            kept_ranges.push(range);
             let pos = node_match.start_pos();
             let edit = node_match.make_edit(&config.matcher, fixer);
             edits.push(FixEdit {
@@ -376,10 +413,23 @@ pub fn apply_fixes(
     }
     fixed.extend_from_slice(&bytes[cursor..]);
 
+    // Splicing bytes at tree-sitter-reported node boundaries and inserting
+    // `Fixer::generate_replacement`'s own output can, in principle, never
+    // produce invalid UTF-8 from a valid `&str` source -- but that
+    // guarantee lives in ast-grep, not in norma's type system, and this
+    // text is about to be written straight to the caller's file
+    // (`cli::fix_files`). A silent `_lossy` substitution here would mean
+    // silently corrupting that file instead of failing loudly, which is
+    // exactly the failure mode `validate`'s own doc comment above warns
+    // against -- so this fails hard instead.
+    let fixed_source = String::from_utf8(fixed)
+        .map_err(|_| anyhow::anyhow!("apply_fixes produced non-UTF-8 output; refusing it"))?;
+
     Ok(FixResult {
-        fixed_source: String::from_utf8_lossy(&fixed).into_owned(),
+        fixed_source,
         applied_count: accepted.len(),
         conflicts,
+        skipped_rules,
     })
 }
 
@@ -387,6 +437,13 @@ pub fn apply_fixes(
 /// lone edit is accepted, a cluster of two or more conflicts and none of
 /// them are. No-op if `cluster` is already empty (the state right after a
 /// previous flush).
+///
+/// `pattern_ids` is deduplicated (while preserving first-seen order)
+/// before being reported: after the same-pattern nesting prune in
+/// `apply_fixes`, a cluster spanning the same pattern twice shouldn't
+/// normally happen, but a pattern matching two distinct, merely
+/// overlapping-not-nested spans is possible for an unusual rule, and a
+/// `FixConflict` listing one pattern id twice would be a confusing report.
 fn flush_cluster<'a>(
     cluster: &mut Vec<&'a FixEdit>,
     accepted: &mut Vec<&'a FixEdit>,
@@ -397,8 +454,14 @@ fn flush_cluster<'a>(
         1 => accepted.push(cluster[0]),
         _ => {
             let first = &cluster[0];
+            let mut pattern_ids: Vec<String> = Vec::new();
+            for edit in cluster.iter() {
+                if !pattern_ids.contains(&edit.pattern_id) {
+                    pattern_ids.push(edit.pattern_id.clone());
+                }
+            }
             conflicts.push(FixConflict {
-                pattern_ids: cluster.iter().map(|e| e.pattern_id.clone()).collect(),
+                pattern_ids,
                 location: CodeLocation {
                     file: None,
                     line: first.line,
@@ -823,6 +886,158 @@ fix: $EXPR.expect("b")
             ids,
             vec!["unwrap-fix-a".to_string(), "unwrap-fix-b".to_string()]
         );
+    }
+
+    #[test]
+    fn apply_fixes_applies_a_chain_of_three_mutually_overlapping_patterns_as_one_cluster() {
+        // Three distinct patterns whose fix ranges all touch the same
+        // code -- the full call `outer(value, extra)`, and two more
+        // patterns each separately matching just the `value` identifier
+        // nested inside it -- must collapse into a *single* conflict via
+        // the sweep, not two or three separate pairwise conflicts. See
+        // `apply_fixes`'s doc comment.
+        let now = Utc::now();
+        let pattern_a = Pattern::from_rule(
+            "Call Fix".to_string(),
+            "d".to_string(),
+            None,
+            r#"
+id: call-fix
+message: a
+severity: warning
+language: Rust
+rule:
+  pattern: outer($ARG, extra)
+fix: renamed($ARG, extra)
+"#
+            .to_string(),
+            true,
+            now,
+            now,
+        )
+        .unwrap();
+        let pattern_b = Pattern::from_rule(
+            "Arg Fix".to_string(),
+            "d".to_string(),
+            None,
+            r#"
+id: arg-fix
+message: b
+severity: warning
+language: Rust
+rule:
+  pattern: value
+fix: renamed_value
+"#
+            .to_string(),
+            true,
+            now,
+            now,
+        )
+        .unwrap();
+        let pattern_c = Pattern::from_rule(
+            "Ident Fix".to_string(),
+            "d".to_string(),
+            None,
+            r#"
+id: ident-fix
+message: c
+severity: warning
+language: Rust
+rule:
+  kind: identifier
+  regex: "^value$"
+fix: renamed_value_c
+"#
+            .to_string(),
+            true,
+            now,
+            now,
+        )
+        .unwrap();
+        let source = "fn main() { outer(value, extra); }";
+
+        let fix = apply_fixes(source, "rust", &[pattern_a, pattern_b, pattern_c]).unwrap();
+
+        assert_eq!(
+            fix.fixed_source, source,
+            "a chained cluster must apply nothing"
+        );
+        assert_eq!(fix.applied_count, 0);
+        assert_eq!(
+            fix.conflicts.len(),
+            1,
+            "three mutually-touching ranges must be one cluster, not several pairwise conflicts"
+        );
+        let mut ids = fix.conflicts[0].pattern_ids.clone();
+        ids.sort();
+        assert_eq!(
+            ids,
+            vec![
+                "arg-fix".to_string(),
+                "call-fix".to_string(),
+                "ident-fix".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn apply_fixes_applies_only_the_outermost_match_of_a_self_nested_pattern() {
+        // A pattern that matches at more than one nesting level of the
+        // same construct (`$EXPR.unwrap()` against `a.unwrap().unwrap()`)
+        // is not two patterns disagreeing -- it's one pattern seeing
+        // itself twice. Before this was pruned, this used to be
+        // misreported as a self-conflict (`pattern_ids: ["no-unwrap-rust",
+        // "no-unwrap-rust"]`) that applied nothing at all.
+        let pattern = test_pattern(RUST_UNWRAP_WITH_FIX);
+        let source = "fn main() { a.unwrap().unwrap(); }";
+
+        let fix = apply_fixes(source, "rust", &[pattern]).unwrap();
+
+        assert!(
+            fix.conflicts.is_empty(),
+            "a pattern matching its own nested output is not a conflict: {:?}",
+            fix.conflicts
+        );
+        assert_eq!(fix.applied_count, 1, "only the outermost match is applied");
+        assert_eq!(
+            fix.fixed_source, r#"fn main() { a.unwrap().expect("TODO"); }"#,
+            "the still-nested inner unwrap() is left for a follow-up --fix pass"
+        );
+    }
+
+    #[test]
+    fn apply_fixes_reports_a_pattern_whose_stored_rule_no_longer_parses() {
+        // Mirrors `validate_reports_a_skipped_pattern_instead_of_silently_dropping_it`:
+        // a `Pattern` built via `from_trusted_row` can carry a `rule` that
+        // no longer parses (simulating bit rot after an ast-grep upgrade,
+        // or a corrupted row). `apply_fixes` must report this in
+        // `skipped_rules` rather than just vanishing it from the output --
+        // the MCP `apply_pattern_fix` tool has no second `validate` call
+        // to catch this the way `cli::fix_files` does.
+        let now = Utc::now();
+        let good = test_pattern(RUST_UNWRAP_WITH_FIX);
+        let broken = Pattern::from_trusted_row(
+            "was-valid-once".to_string(),
+            "Was Valid Once".to_string(),
+            "d".to_string(),
+            None,
+            "rust".to_string(),
+            Severity::Warning,
+            "not: valid: yaml: at: all: -".to_string(),
+            true,
+            now,
+            now,
+        );
+
+        let fix = apply_fixes("fn main() { value.unwrap(); }", "rust", &[good, broken]).unwrap();
+
+        assert_eq!(
+            fix.applied_count, 1,
+            "the still-valid pattern must still be applied"
+        );
+        assert_eq!(fix.skipped_rules.len(), 1);
+        assert_eq!(fix.skipped_rules[0].0, "was-valid-once");
     }
 
     // Verifies TF-890 decision point 4: a `rewriters:` list embedded

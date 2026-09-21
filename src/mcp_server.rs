@@ -37,7 +37,11 @@ pub struct RegisterPatternParams {
     #[serde(default)]
     #[schemars(schema_with = "optional_string_schema")]
     pub category: Option<String>,
-    /// A full ast-grep RuleConfig YAML document (id/message/severity/language/rule).
+    /// A full ast-grep RuleConfig YAML document
+    /// (id/message/severity/language/rule, optionally fix). A `fix:` key
+    /// makes the pattern usable by `apply_pattern_fix` and populates
+    /// `validate_pattern_compliance`'s `suggested_fix` on a match; without
+    /// one, the pattern can still be validated against, just not fixed.
     pub rule: String,
 }
 

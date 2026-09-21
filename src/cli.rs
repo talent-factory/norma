@@ -89,6 +89,9 @@ pub struct FixReport {
     pub file: PathBuf,
     pub applied: usize,
     pub conflicts: Vec<crate::models::FixConflict>,
+    /// `(pattern_id, parse error)` for every enabled pattern whose stored
+    /// `rule` no longer parses -- forwarded from `FixResult::skipped_rules`.
+    pub skipped_rules: Vec<(String, String)>,
     /// The remaining violations after applying every non-conflicting fix
     /// -- includes anything left over: unfixable patterns, conflicted
     /// matches, and any real defect the fixes didn't touch.
@@ -106,15 +109,28 @@ pub struct FixReport {
 /// unmodified file keeps its original mtime, so this is safe to run
 /// against a directory `norma validate` (without `--fix`) already found
 /// clean.
+///
+/// Every file is read up front, before any file is written: `--fix`
+/// mutates files as a side effect, so failing an unreadable file *after*
+/// already rewriting earlier ones in the batch (as `validate_files`'s
+/// read-as-you-go loop would, harmlessly, since it never writes) would
+/// leave those rewrites unreported -- the caller's only signal would be an
+/// error naming just the one file that failed to read. Reading everything
+/// first means a read failure here still means nothing was written.
 pub fn fix_files(
     files: &[PathBuf],
     language: &str,
     patterns: &[Pattern],
 ) -> anyhow::Result<Vec<FixReport>> {
-    let mut reports = Vec::with_capacity(files.len());
+    let mut sources = Vec::with_capacity(files.len());
     for file in files {
         let code = std::fs::read_to_string(file)
             .map_err(|e| anyhow::anyhow!("{}: {e}", file.display()))?;
+        sources.push((file, code));
+    }
+
+    let mut reports = Vec::with_capacity(files.len());
+    for (file, code) in sources {
         let fix = pattern_engine::apply_fixes(&code, language, patterns)?;
         if fix.applied_count > 0 {
             std::fs::write(file, &fix.fixed_source)
@@ -125,6 +141,7 @@ pub fn fix_files(
             file: file.clone(),
             applied: fix.applied_count,
             conflicts: fix.conflicts,
+            skipped_rules: fix.skipped_rules,
             result,
         });
     }
@@ -206,6 +223,12 @@ pub fn render_fix_report(file: &Path, report: &FixReport) -> String {
             conflict.location.line + 1,
             conflict.location.column + 1,
             conflict.pattern_ids.join(", ")
+        ));
+    }
+    for (pattern_id, error) in &report.skipped_rules {
+        out.push_str(&format!(
+            "{}: [warning] pattern {pattern_id:?} has an unparsable rule, skipped: {error}\n",
+            file.display()
         ));
     }
     out.push_str(&render_human_readable(file, &report.result));
@@ -621,11 +644,58 @@ fix: $EXPR.expect("TODO")
     }
 
     #[test]
+    fn fix_files_reports_a_pattern_whose_stored_rule_no_longer_parses() {
+        use crate::models::Severity;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("has_unwrap.rs");
+        std::fs::write(&file, "fn main() { value.unwrap(); }").unwrap();
+
+        let now = chrono::Utc::now();
+        let broken = Pattern::from_trusted_row(
+            "was-valid-once".to_string(),
+            "Was Valid Once".to_string(),
+            "d".to_string(),
+            None,
+            "rust".to_string(),
+            Severity::Warning,
+            "not: valid: yaml: at: all: -".to_string(),
+            true,
+            now,
+            now,
+        );
+
+        let reports = fix_files(
+            std::slice::from_ref(&file),
+            "rust",
+            &[rust_unwrap_pattern(), broken],
+        )
+        .unwrap();
+
+        // The still-valid pattern is applied normally...
+        assert_eq!(reports[0].applied, 1);
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            r#"fn main() { value.expect("TODO"); }"#
+        );
+        // ...and the broken one is reported, not silently dropped.
+        assert_eq!(reports[0].skipped_rules.len(), 1);
+        assert_eq!(reports[0].skipped_rules[0].0, "was-valid-once");
+
+        let rendered = render_fix_report(&file, &reports[0]);
+        assert!(
+            rendered.contains("\"was-valid-once\" has an unparsable rule, skipped:"),
+            "got: {rendered}"
+        );
+    }
+
+    #[test]
     fn render_fix_report_shows_applied_count_then_remaining_violations() {
         let report = FixReport {
             file: PathBuf::from("src/lib.rs"),
             applied: 2,
             conflicts: vec![],
+            skipped_rules: vec![],
             result: ValidationResult {
                 violations: vec![],
                 passed: true,
@@ -654,6 +724,7 @@ fix: $EXPR.expect("TODO")
                     column: 2,
                 },
             }],
+            skipped_rules: vec![],
             result: ValidationResult {
                 violations: vec![],
                 passed: true,
