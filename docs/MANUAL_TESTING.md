@@ -149,8 +149,17 @@ Expected: both commands list the same patterns as step 3;
 The easiest way to drive the server interactively (needs Node.js):
 
 ```bash
-npx @modelcontextprotocol/inspector cargo run -- --db /tmp/norma-manual-test.db serve
+npx @modelcontextprotocol/inspector -- cargo run -- --db /tmp/norma-manual-test.db serve
 ```
+
+Note the leading `-- ` right after `inspector`: the Inspector's own launcher
+splits its argv on the *first* `--` it finds (to separate its own flags from
+the ad-hoc server command) and then drops that token instead of forwarding
+it. With only one `--` (i.e. `inspector cargo run -- --db ... serve`), that's
+the one meant for `cargo run`, so it gets eaten and cargo sees a bare
+`--db` it doesn't recognize (`error: unexpected argument '--db' found`,
+visible as a "Failed" server in the UI). The extra `--` sacrifices itself to
+the Inspector's split, letting the real one reach `cargo` intact.
 
 This opens a local web UI. From there:
 

@@ -27,9 +27,33 @@ pub struct LanguageParams {
 pub struct RegisterPatternParams {
     pub name: String,
     pub description: String,
+    // `serde(default)` is redundant for deserializing a missing field --
+    // serde already defaults a missing `Option<T>` field to `None` -- but
+    // schemars' derive only omits a field from the schema's `required` list
+    // via *either* that attribute *or* recognizing the field's type as
+    // `Option<T>`, and `schema_with` below swaps in a wrapper type that no
+    // longer looks like `Option<T>` to it. Without this, `category` would
+    // wrongly show up as required in the generated schema.
+    #[serde(default)]
+    #[schemars(schema_with = "optional_string_schema")]
     pub category: Option<String>,
     /// A full ast-grep RuleConfig YAML document (id/message/severity/language/rule).
     pub rule: String,
+}
+
+/// Renders `Option<String>` as `{"anyOf": [{"type": "string"}, {"type":
+/// "null"}]}` instead of schemars' default `{"type": ["string", "null"]}`.
+/// Both are valid JSON Schema, but several MCP clients read `type` as a
+/// single string and either reject the tool or silently drop the null
+/// branch -- this is the fix for the MCP Inspector's schema-portability
+/// warning on `register_pattern`'s `category` field.
+fn optional_string_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "anyOf": [
+            { "type": "string" },
+            { "type": "null" }
+        ]
+    })
 }
 
 /// Maps a store/engine failure to an MCP `internal_error`, logging it
