@@ -6,6 +6,7 @@ use ast_grep_core::replacer::Replacer;
 use ast_grep_language::{LanguageExt, SupportLang};
 use chrono::{DateTime, Utc};
 use std::str::FromStr;
+use std::sync::LazyLock;
 use std::time::Instant;
 
 /// Pattern id used for the synthetic warning `validate` adds when zero
@@ -14,9 +15,50 @@ use std::time::Instant;
 /// on why a real `Pattern` can't be constructed with an arbitrary id.
 pub const NO_COVERAGE_PATTERN_ID: &str = "__norma_no_coverage__";
 
-/// Every language key norma supports, in the order shown in error
-/// messages. Kept in sync with `language_key` below.
-pub const SUPPORTED_LANGUAGES: [&str; 4] = ["java", "python", "rust", "typescript"];
+/// `(SupportLang variant, norma's canonical key)` for every `SupportLang`
+/// `ast-grep-language` ships, generically derived from
+/// `SupportLang::all_langs()` rather than hardcoded -- see `language_key`'s
+/// doc comment for why. Built once, on first use; `String` rather than a
+/// leaked `&'static str`, since a `static`'s own storage already lives for
+/// the program's lifetime -- `.as_str()` on an entry borrows that for free.
+///
+/// The canonical key is the variant's `Display` output (its bare name,
+/// e.g. `"Rust"`, `"CSharp"`) lowercased. That's not itself one of
+/// ast-grep-language's declared aliases, and those alias lists are
+/// inconsistent about which alias is "canonical" (Rust's first alias is
+/// `"rs"`, TypeScript's is `"ts"`) -- but the lowercased variant name does
+/// land on *some* alias of that same language for every one of the 28
+/// current variants, which is what the round-trip assertion below verifies
+/// rather than assumes. This is a build-time-deterministic property (no
+/// user input involved, and the `ast-grep-language` version is exactly
+/// pinned in Cargo.toml) -- a future version bump that broke it for some
+/// variant must fail loudly and immediately (here, at first access, before
+/// norma serves a single request) rather than silently registering that
+/// language under a key nothing could ever look up again, which would
+/// otherwise surface only as a confusing "no coverage" report much later.
+static LANGUAGE_KEYS: LazyLock<Vec<(SupportLang, String)>> = LazyLock::new(|| {
+    SupportLang::all_langs()
+        .iter()
+        .map(|&lang| {
+            let key = lang.to_string().to_lowercase();
+            assert_eq!(
+                SupportLang::from_str(&key).ok(),
+                Some(lang),
+                "ast-grep-language variant {lang:?} lowercases to {key:?}, \
+                 which doesn't parse back to it -- LANGUAGE_KEYS's \
+                 derivation assumption broke, most likely from an \
+                 ast-grep-language version bump changing an alias list"
+            );
+            (lang, key)
+        })
+        .collect()
+});
+
+/// Every language key norma supports, in `SupportLang::all_langs()`'s
+/// order -- the order shown in error messages. Derived from
+/// `LANGUAGE_KEYS`, so it can't drift out of sync with `language_key`.
+pub static SUPPORTED_LANGUAGES: LazyLock<Vec<&'static str>> =
+    LazyLock::new(|| LANGUAGE_KEYS.iter().map(|(_, key)| key.as_str()).collect());
 
 /// Parses a full ast-grep RuleConfig YAML document (see docs/adr/0002.md)
 /// and returns the compiled rule, or an error if the YAML is malformed or
@@ -34,24 +76,28 @@ pub fn parse_rule(rule_yaml: &str) -> anyhow::Result<RuleConfig<SupportLang>> {
 
 /// norma's own canonical language key for a `SupportLang`, matching the
 /// strings used in the `patterns.language` SQLite column and the MCP tool
-/// parameters (`"java"`, `"python"`, `"rust"`, `"typescript"`).
-/// ast-grep-language's own alias lists are inconsistent for this purpose
-/// (Rust's first alias is `"rs"`, TypeScript's is `"ts"`), so norma keeps
-/// its own explicit mapping for the four MVP languages.
+/// parameters -- e.g. `"java"`, `"python"`, `"rust"`, `"typescript"`, and,
+/// since TF-893, every other `SupportLang` variant too (`"go"`, `"css"`,
+/// `"markdown"`, ...; see `LANGUAGE_KEYS`). *Registrable* is not the same
+/// as *shipped with default patterns*: `default_patterns.rs` still only
+/// covers Java/Python/Rust/TypeScript -- the other 24 languages are
+/// registrable but pattern-less until someone writes patterns for them.
 ///
-/// Returns `None` for every other `SupportLang`. Callers MUST treat that
-/// as an error rather than substituting a placeholder: a pattern stored
-/// under a placeholder key would be permanently unreachable, and a
-/// validation run against one would silently check nothing and report
-/// `passed: true`.
+/// In practice this can never return `None` for a real `SupportLang`
+/// value: `LANGUAGE_KEYS` covers every variant `SupportLang::all_langs()`
+/// lists (i.e. all of them -- `SupportLang` is a closed enum), and its
+/// construction panics rather than skipping an entry if the round-trip
+/// assumption ever breaks (see `LANGUAGE_KEYS`'s doc comment). The
+/// `Option` return type is kept anyway as the honest contract for
+/// callers: MUST treat `None` as an error rather than substituting a
+/// placeholder -- a pattern stored under a placeholder key would be
+/// permanently unreachable, and a validation run against one would
+/// silently check nothing and report `passed: true`.
 pub fn language_key(lang: SupportLang) -> Option<&'static str> {
-    match lang {
-        SupportLang::Java => Some("java"),
-        SupportLang::Python => Some("python"),
-        SupportLang::Rust => Some("rust"),
-        SupportLang::TypeScript => Some("typescript"),
-        _ => None,
-    }
+    LANGUAGE_KEYS
+        .iter()
+        .find(|(candidate, _)| *candidate == lang)
+        .map(|(_, key)| key.as_str())
 }
 
 /// Resolves a user-supplied language string (`--language`, or the MCP
@@ -621,6 +667,9 @@ rule:
   pattern: println!($$$ARGS)
 "#;
 
+    // Go is one of the 24 languages TF-893 unlocked -- previously rejected
+    // by `check_registerable`, now registrable (just without shipped
+    // default patterns; see `default_patterns.rs`).
     const GO_RULE: &str = r#"
 id: no-debug-print-go
 message: Avoid fmt.Println in production code
@@ -628,6 +677,45 @@ severity: warning
 language: Go
 rule:
   pattern: fmt.Println($$$ARGS)
+"#;
+
+    // A plain `pattern: <string>` rule (like GO_RULE above) is accepted
+    // as structurally valid by `parse_rule`, but that doesn't mean it
+    // actually matches real Go source: unlike Rust/Java/Python/
+    // TypeScript, a bare Go fragment like `fmt.Println($$$ARGS)` doesn't
+    // parse into the same `call_expression` node a full Go file's real
+    // call expressions do, so GO_RULE never matches anything in practice
+    // (see validate_finds_a_real_violation_in_a_previously_unsupported_language,
+    // which needs this rule instead). ast-grep's fix for exactly this is
+    // the `context`/`selector` object form of `pattern:` -- give it a
+    // parseable enclosing snippet (`context`) and name which node inside
+    // that snippet is the actual matcher (`selector`). This is the
+    // "pattern-authoring per language is its own follow-up effort" the
+    // TF-893 ticket deliberately scoped out -- captured here only because
+    // this test needs *a* working rule, not as a general solution.
+    const GO_RULE_WITH_WORKING_PATTERN: &str = r#"
+id: no-debug-print-go-working
+message: Avoid fmt.Println in production code
+severity: warning
+language: Go
+rule:
+  pattern:
+    context: "func _() { fmt.Println($$$ARGS) }"
+    selector: call_expression
+"#;
+
+    // Cobol isn't one of the 28 `SupportLang` variants ast-grep-language
+    // 0.45.3 ships -- no version of norma has ever supported it, TF-893
+    // included. Used by the tests that need a language genuinely outside
+    // ast-grep's own reach, as opposed to one merely outside norma's old
+    // 4-language MVP set.
+    const COBOL_RULE: &str = r#"
+id: no-debug-print-cobol
+message: Avoid DISPLAY in production code
+severity: warning
+language: Cobol
+rule:
+  pattern: DISPLAY $$$ARGS
 "#;
 
     #[test]
@@ -658,21 +746,38 @@ rule:
     }
 
     #[test]
-    fn from_rule_rejects_a_language_norma_does_not_support() {
+    fn from_rule_accepts_a_previously_unsupported_language() {
+        // TF-893: a Go rule is no longer rejected at the `language_key`
+        // gate -- it's now built like any other, just under the "go" key
+        // rather than one of the original four.
+        let pattern = test_pattern(GO_RULE);
+        assert_eq!(pattern.language(), "go");
+    }
+
+    #[test]
+    fn from_rule_rejects_a_language_ast_grep_does_not_support() {
         let now = Utc::now();
         let err = Pattern::from_rule(
             "No Debug Print".to_string(),
             "d".to_string(),
             None,
-            GO_RULE.to_string(),
+            COBOL_RULE.to_string(),
             true,
             now,
             now,
         )
-        .expect_err("a Go rule must be rejected, not built");
+        .expect_err("a language ast-grep-language itself doesn't know must still be rejected");
+        // Unlike an unsupported-but-real `SupportLang` (impossible since
+        // TF-893 -- see `from_rule_accepts_a_previously_unsupported_language`),
+        // this fails inside `parse_rule`'s YAML deserialization, before
+        // `check_registerable` (and its "unsupported language" message)
+        // ever runs. `err.to_string()` (Display, top-level only) is just
+        // "Fail to parse yaml as RuleConfig" -- the useful detail is one
+        // level down in the anyhow chain, so assert on `{err:?}` instead.
+        let chain = format!("{err:?}");
         assert!(
-            err.to_string().contains("unsupported language"),
-            "unexpected error: {err}"
+            chain.contains("Cobol"),
+            "expected the error chain to name the rejected language, got: {chain}"
         );
     }
 
@@ -684,6 +789,32 @@ rule:
         assert_eq!(result.violations.len(), 1);
         assert!(!result.passed);
         assert_eq!(result.violations[0].matched_text, "println!(\"debug\")");
+        assert_eq!(result.checked_patterns, 1);
+    }
+
+    #[test]
+    fn validate_finds_a_real_violation_in_a_previously_unsupported_language() {
+        // TF-893: `from_rule_accepts_a_previously_unsupported_language` and
+        // `test_rule_accepts_a_previously_unsupported_language` only prove
+        // a Go rule is no longer rejected at the `language_key` gate --
+        // neither runs it against source that actually contains a match,
+        // so neither could tell "Go matching works" apart from "Go
+        // matching silently finds nothing". This does, against real Go
+        // source, the same way `validate_finds_a_real_violation` does for
+        // Rust -- proving the tree-sitter-go grammar (already compiled in,
+        // per `Cargo.toml`'s default `ast-grep-language` features) is
+        // genuinely reachable end to end, not just that the gate got out
+        // of the way. Deliberately *not* GO_RULE -- see
+        // GO_RULE_WITH_WORKING_PATTERN's doc comment for why the plain
+        // `pattern: fmt.Println($$$ARGS)` string every other Go-rule test
+        // in this file uses never actually matches real Go source.
+        let pattern = test_pattern(GO_RULE_WITH_WORKING_PATTERN);
+        let source =
+            "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"debug\")\n}\n";
+        let result = validate(source, "go", &[pattern]).unwrap();
+        assert_eq!(result.violations.len(), 1);
+        assert!(!result.passed);
+        assert_eq!(result.violations[0].matched_text, "fmt.Println(\"debug\")");
         assert_eq!(result.checked_patterns, 1);
     }
 
@@ -791,10 +922,28 @@ rule:
     }
 
     #[test]
-    fn language_key_is_none_for_languages_outside_the_mvp_set() {
+    fn language_key_covers_every_ast_grep_language() {
+        // TF-893: `language_key` is no longer a curated 4-language
+        // allowlist -- Go and Css (both previously `None`) now resolve
+        // like any other `SupportLang` variant.
         assert_eq!(language_key(SupportLang::Rust), Some("rust"));
-        assert_eq!(language_key(SupportLang::Go), None);
-        assert_eq!(language_key(SupportLang::Css), None);
+        assert_eq!(language_key(SupportLang::Go), Some("go"));
+        assert_eq!(language_key(SupportLang::Css), Some("css"));
+        // The derivation (see `LANGUAGE_KEYS`) must be total across every
+        // variant `ast-grep-language` currently ships, not just these
+        // three -- a `None` here would make that language's patterns
+        // permanently unreachable.
+        for &lang in SupportLang::all_langs() {
+            assert!(
+                language_key(lang).is_some(),
+                "{lang:?} has no canonical key"
+            );
+        }
+    }
+
+    #[test]
+    fn supported_languages_covers_every_ast_grep_language() {
+        assert_eq!(SUPPORTED_LANGUAGES.len(), SupportLang::all_langs().len());
     }
 
     #[test]
@@ -807,16 +956,33 @@ rule:
 
     #[test]
     fn resolve_language_rejects_unsupported_and_misspelled_languages() {
-        // A real ast-grep language norma has no patterns for...
-        assert!(resolve_language("go").is_err());
+        // A real language, but not one of the 28 `SupportLang` variants
+        // ast-grep-language ships (since TF-893, "go" no longer belongs
+        // here -- see resolve_language_accepts_every_ast_grep_language)...
+        assert!(resolve_language("cobol").is_err());
         // ...and something that isn't a language at all.
         assert!(resolve_language("rustt").is_err());
     }
 
     #[test]
+    fn resolve_language_accepts_every_ast_grep_language() {
+        // TF-893: Go -- previously rejected -- now resolves like any
+        // other `SupportLang`, even though norma ships no default
+        // patterns for it (see `default_patterns.rs`).
+        assert_eq!(resolve_language("go").unwrap(), "go");
+        assert_eq!(resolve_language("golang").unwrap(), "go");
+        // Case-insensitivity (already proven for an original MVP language
+        // by resolve_language_accepts_canonical_keys_and_ast_grep_aliases)
+        // holds for a newly-unlocked one too -- it's implemented once,
+        // generically, in ast-grep-language's shared `FromStr`.
+        assert_eq!(resolve_language("Go").unwrap(), "go");
+        assert_eq!(resolve_language("GOLANG").unwrap(), "go");
+    }
+
+    #[test]
     fn validate_errors_instead_of_falsely_passing_an_unsupported_language() {
         let pattern = test_pattern(RUST_NO_DEBUG_PRINT);
-        let err = validate("package main", "go", &[pattern]).unwrap_err();
+        let err = validate("package main", "cobol", &[pattern]).unwrap_err();
         assert!(
             err.to_string().contains("unsupported language"),
             "unexpected error: {err}"
@@ -974,11 +1140,22 @@ fix: $EXPR.expect("TODO")
     }
 
     #[test]
-    fn test_rule_rejects_a_language_norma_does_not_support() {
-        let err = test_rule(GO_RULE, "package main").unwrap_err();
+    fn test_rule_accepts_a_previously_unsupported_language() {
+        // TF-893: mirrors from_rule_accepts_a_previously_unsupported_language.
+        let result = test_rule(GO_RULE, "package main").unwrap();
+        assert!(result.passed);
+    }
+
+    #[test]
+    fn test_rule_rejects_a_language_ast_grep_does_not_support() {
+        let err = test_rule(COBOL_RULE, "PROGRAM-ID. MAIN.").unwrap_err();
+        // See from_rule_rejects_a_language_ast_grep_does_not_support for
+        // why this asserts on `{err:?}` rather than norma's own
+        // "unsupported language" text.
+        let chain = format!("{err:?}");
         assert!(
-            err.to_string().contains("unsupported language"),
-            "unexpected error: {err}"
+            chain.contains("Cobol"),
+            "expected the error chain to name the rejected language, got: {chain}"
         );
     }
 
@@ -987,9 +1164,10 @@ fix: $EXPR.expect("TODO")
     /// other tests in this module already probe individually -- the "dry
     /// run" property TF-891 is built on. A single hardcoded rule can only
     /// confirm one of the two ever agree on "accept"; this drives both
-    /// through a valid rule and each of the two known-bad shapes so a
-    /// future divergence (e.g. `check_registerable` and `Pattern::from_rule`
-    /// drifting apart again) would actually be caught here.
+    /// through a valid rule and each of the known-bad/now-accepted shapes
+    /// so a future divergence (e.g. `check_registerable` and
+    /// `Pattern::from_rule` drifting apart again) would actually be
+    /// caught here.
     #[test]
     fn test_rule_and_from_rule_agree_on_every_rule_shape() {
         fn from_rule_accepts(rule: &str) -> bool {
@@ -1008,7 +1186,10 @@ fix: $EXPR.expect("TODO")
         for (rule, source) in [
             (RUST_NO_DEBUG_PRINT, "fn main() {}"),
             (RULE_WITHOUT_ID, "fn main() {}"),
+            // Accepted since TF-893 (was rejected before).
             (GO_RULE, "package main"),
+            // Still rejected -- ast-grep itself has no Cobol grammar.
+            (COBOL_RULE, "PROGRAM-ID. MAIN."),
         ] {
             assert_eq!(
                 test_rule(rule, source).is_ok(),
@@ -1324,7 +1505,7 @@ rewriters:
     #[test]
     fn apply_fixes_errors_instead_of_falsely_no_opping_an_unsupported_language() {
         let pattern = test_pattern(RUST_UNWRAP_WITH_FIX);
-        let err = apply_fixes("package main", "go", &[pattern]).unwrap_err();
+        let err = apply_fixes("package main", "cobol", &[pattern]).unwrap_err();
         assert!(
             err.to_string().contains("unsupported language"),
             "unexpected error: {err}"

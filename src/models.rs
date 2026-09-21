@@ -73,7 +73,10 @@ pub struct Pattern {
     pub description: String,
     /// Free-text grouping, e.g. `"code-quality"`, `"creational"`. Not a fixed enum.
     pub category: Option<String>,
-    /// norma's canonical language key: `"java"` | `"python"` | `"rust"` | `"typescript"`.
+    /// norma's canonical language key -- see `pattern_engine::language_key`.
+    /// Not limited to `"java"`/`"python"`/`"rust"`/`"typescript"`: any of
+    /// the 28 languages `ast-grep-language` supports is valid since TF-893,
+    /// though those four are the only ones with shipped default patterns.
     language: String,
     /// Derived from the parsed `rule` YAML when the pattern was registered.
     severity: Severity,

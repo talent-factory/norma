@@ -8,8 +8,12 @@
 ## 🎯 Features
 
 - ✅ **Pattern Validation** — Check code against registered design patterns
-- ✅ **Multi-Language Support** — Java, Python, Rust and TypeScript (an
-  unsupported `--language` is rejected, never silently skipped)
+- ✅ **Multi-Language Support** — every language `ast-grep-language` ships
+  (28 in total: Java, Python, Rust, TypeScript, Go, C, C++, ... — an
+  unsupported or misspelled `--language` is rejected, never silently
+  skipped). Default patterns currently ship for Java, Python, Rust and
+  TypeScript; the rest are registrable via `register_pattern` but have no
+  patterns out of the box.
 - ✅ **MCP Integration** — Works with Claude Code, Cursor, and other MCP clients
 - ✅ **Persistent Storage** — SQLite-backed pattern registry
 - ✅ **Real-Time Feedback** — Instant violation detection with file:line:column locations
@@ -141,7 +145,7 @@ Register one via the `register_pattern` MCP tool, or in Rust via `PatternStore::
 
 ### Adopting an existing ast-grep rule
 
-Because `rule` stores ast-grep's `RuleConfig` YAML verbatim (see [ADR 0002](docs/adr/0002-pattern-single-language-full-rule-config.md)), a rule documented in [ast-grep's own catalog](https://ast-grep.github.io/catalog/), produced by `ast-grep-mcp`'s `test_match_code_rule`, or copied from `ast-grep --pattern` CLI output needs no reshaping to become a norma `Pattern` -- only its `language:` value may need to change to whichever of norma's four supported languages it belongs to (`Java` | `Python` | `Rust` | `TypeScript`).
+Because `rule` stores ast-grep's `RuleConfig` YAML verbatim (see [ADR 0002](docs/adr/0002-pattern-single-language-full-rule-config.md)), a rule documented in [ast-grep's own catalog](https://ast-grep.github.io/catalog/), produced by `ast-grep-mcp`'s `test_match_code_rule`, or copied from `ast-grep --pattern` CLI output needs no reshaping to become a norma `Pattern` -- its `language:` value just needs to be one of the 28 languages `ast-grep-language` supports (norma rejects everything else loudly, never silently matching zero patterns). Default patterns currently ship for only Java, Python, Rust and TypeScript; the other 24 are registrable the same way, just without a starter set of their own.
 
 Take this rule, unmodified from ast-grep's catalog:
 
@@ -159,7 +163,7 @@ rule:
 fix: $A
 ```
 
-Swap `language: JavaScript` for `language: TypeScript` (norma's four canonical keys are `java`/`python`/`rust`/`typescript`; `TypeScript`'s grammar is a superset of the plain-JS pattern here) and pass the whole document through `register_pattern` unchanged otherwise:
+`language: JavaScript` is registrable as-is since TF-893 -- but this example swaps it for `language: TypeScript` anyway (`TypeScript`'s grammar is a superset of the plain-JS pattern here, so the same rule also catches TS/TSX code, and norma ships default patterns for `typescript`, not `javascript`) and passes the whole document through `register_pattern` unchanged otherwise:
 
 ```jsonc
 register_pattern(
