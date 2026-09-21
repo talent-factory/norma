@@ -16,6 +16,7 @@ Eine Spec: eine geprüfte, entschiedene Liste (adopt/defer/reject) von ast-grep-
 ## Decisions so far
 
 - [Autofix/Rewrite-Unterstützung](issues/01-autofix-rewrite-support.md) — Adopt: `suggested_fix` in `PatternViolation` (Anzeigen) + `--fix` (CLI, in-place) + eigenständiges MCP-Tool `apply_pattern_fix` (Anwenden, rein lesend/rückgabebasiert). Fail-safe bei überlappenden Fixes (keiner wird angewendet). Lokale `rewriters` laufen vermutlich automatisch mit, globale sind out of scope. → [TF-890](https://linear.app/talent-factory/issue/TF-890).
+- [Regel-Testing/AST-Debug-Tooling](issues/02-rule-testing-ast-debug-tooling.md) — Adopt (eingeschränkt): neues Tool `test_pattern(rule, code)`, nichts gespeichert, liefert auch `suggested_fix`. Kein `dump_syntax_tree`-Äquivalent (reiner Klon von `ast-grep-mcp` ohne norma-Mehrwert). → [TF-891](https://linear.app/talent-factory/issue/TF-891).
 
 ## Not yet specified
 
