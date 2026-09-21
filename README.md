@@ -16,6 +16,21 @@
 - ✅ **Custom Patterns** — Define team-specific coding standards
 - ✅ **Educational Focus** — Perfect for teaching design patterns
 
+## 🆚 norma vs. ast-grep's own `ast-grep-mcp`
+
+ast-grep ships its own experimental MCP server, [`ast-grep-mcp`](https://github.com/ast-grep/ast-grep-mcp). It's worth knowing about, because it answers a different question than norma does:
+
+| | [`ast-grep-mcp`](https://github.com/ast-grep/ast-grep-mcp) | norma |
+|---|---|---|
+| Answers | "Where does X occur in this code, and how do I write a rule for it?" | "Does this code violate one of our team's standing rules?" |
+| Rules | ephemeral — built by the AI agent per call, never stored | persistent — registered once via `register_pattern`, enforced on every later call |
+| Implementation | Python, shells out to the `ast-grep` CLI as a subprocess | Rust, links `ast-grep-core`/`-config`/`-language` directly as a library (no subprocess) |
+| Tools | `dump_syntax_tree`, `test_match_code_rule`, `find_code`, `find_code_by_rule` — a search/debug workflow | `validate_pattern_compliance`, `get_pattern_checklist`, `register_pattern`, `list_patterns` — a compliance workflow |
+| State | none (SQLite-free) | SQLite-backed `PatternStore`, survives restarts and project switches |
+| Status | explicitly experimental | in production use here, with tests and ADRs (`docs/adr/`) |
+
+In short: `ast-grep-mcp` is `ast-grep --pattern`, reachable over MCP for interactive exploration. norma is closer to `eslint`/`checkstyle` with a fixed, versioned rule set — using ast-grep as its match engine instead of a hand-rolled one. The two are complementary, not competing: use `ast-grep-mcp` (or the plain `ast-grep` CLI) to *discover and iterate on* a rule, then register the finished rule in norma to *enforce* it from then on — see [Adopting an existing ast-grep rule](#adopting-an-existing-ast-grep-rule) below.
+
 ## Usage
 
 Build and install once:
@@ -111,6 +126,39 @@ A `Pattern` is single-language (see [ADR 0002](docs/adr/0002-pattern-single-lang
 
 Register one via the `register_pattern` MCP tool, or in Rust via `PatternStore::register_pattern(name, description, category, rule_yaml)` -- see `src/default_patterns.rs` for the 20 patterns norma ships with.
 
+### Adopting an existing ast-grep rule
+
+Because `rule` stores ast-grep's `RuleConfig` YAML verbatim (see [ADR 0002](docs/adr/0002-pattern-single-language-full-rule-config.md)), a rule documented in [ast-grep's own catalog](https://ast-grep.github.io/catalog/), produced by `ast-grep-mcp`'s `test_match_code_rule`, or copied from `ast-grep --pattern` CLI output needs no reshaping to become a norma `Pattern` -- only its `language:` value may need to change to whichever of norma's four supported languages it belongs to (`Java` | `Python` | `Rust` | `TypeScript`).
+
+Take this rule, unmodified from ast-grep's catalog:
+
+```yaml
+id: no-await-in-promise-all
+severity: error
+language: JavaScript
+message: No await in Promise.all
+rule:
+  pattern: await $A
+  inside:
+    pattern: Promise.all($_)
+    stopBy:
+      not: { any: [{ kind: array }, { kind: arguments }] }
+fix: $A
+```
+
+Swap `language: JavaScript` for `language: TypeScript` (norma's four canonical keys are `java`/`python`/`rust`/`typescript`; `TypeScript`'s grammar is a superset of the plain-JS pattern here) and pass the whole document through `register_pattern` unchanged otherwise:
+
+```jsonc
+register_pattern(
+  name: "No await inside Promise.all",
+  description: "Promise.all already awaits each element; awaiting inside the array is redundant and usually a sign the loop was meant to run in parallel.",
+  category: "code-quality",
+  rule: "id: no-await-in-promise-all\nseverity: error\nlanguage: TypeScript\nmessage: No await in Promise.all\nrule:\n  pattern: await $A\n  inside:\n    pattern: Promise.all($_)\n    stopBy:\n      not: { any: [{ kind: array }, { kind: arguments }] }\nfix: $A\n"
+)
+```
+
+`register_pattern` only guarantees the YAML *parses* -- not that it matches what you intend (`RegisterPatternError::InvalidRule` rejects malformed YAML before it ever reaches storage, per `src/mcp_server.rs`). Sanity-check the rule against a snippet before relying on it: either with ast-grep-mcp's `test_match_code_rule` (or the plain `ast-grep` CLI) beforehand, or after registering by calling `validate_pattern_compliance` with code you expect it to flag.
+
 ## 🔧 Development
 
 ### Running Tests
@@ -137,7 +185,7 @@ cargo fmt --check
 cargo clippy
 ```
 
-## 🎓 For FFHS Students
+## 🎓 For Students
 
 norma is designed to help you:
 
@@ -199,4 +247,4 @@ Contributions welcome! Please:
 
 ---
 
-**Built with ❤️ for teaching AI-assisted software engineering at FFHS**
+**Built with ❤️ for teaching AI-assisted software engineering**
