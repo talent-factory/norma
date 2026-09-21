@@ -24,6 +24,16 @@ pub struct LanguageParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct TestPatternParams {
+    /// A full ast-grep RuleConfig YAML document (id/message/severity/language/rule,
+    /// optionally fix) -- the exact same shape `register_pattern`'s `rule`
+    /// expects. Nothing is persisted; this only tests the rule.
+    pub rule: String,
+    /// Example source code to test the rule against.
+    pub code: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct RegisterPatternParams {
     pub name: String,
     pub description: String,
@@ -83,11 +93,12 @@ fn to_json(value: &impl serde::Serialize) -> Result<String, ErrorData> {
     serde_json::to_string(value).map_err(to_tool_error)
 }
 
-/// The norma MCP tool server. Wraps a `PatternStore` and exposes five
+/// The norma MCP tool server. Wraps a `PatternStore` and exposes six
 /// tools: validating code, applying registered patterns' fixes to code,
-/// listing the patterns for a language, registering a new pattern, and
-/// listing every pattern. This is the same core the `norma validate` CLI
-/// subcommand calls (`cli.rs`), just reached over stdio instead -- see
+/// listing the patterns for a language, dry-running a candidate rule
+/// before registering it, registering a new pattern, and listing every
+/// pattern. This is the same core the `norma validate` CLI subcommand
+/// calls (`cli.rs`), just reached over stdio instead -- see
 /// docs/adr/0001.md.
 #[derive(Clone)]
 pub struct NormaServer {
@@ -166,6 +177,33 @@ impl NormaServer {
             .await
             .map_err(to_tool_error)?;
         to_json(&patterns)
+    }
+
+    /// Dry-runs a candidate rule against example code without registering
+    /// it (TF-891) -- the gap the README's "Adopting an existing ast-grep
+    /// rule" section used to describe as a workaround (register first via
+    /// `register_pattern`, then check it worked via
+    /// `validate_pattern_compliance`). Applies the exact same structural
+    /// checks `register_pattern` would (non-empty `id`, a language norma
+    /// supports -- see `pattern_engine::check_registerable`), so a rule
+    /// this accepts is guaranteed to also be accepted by `register_pattern`.
+    ///
+    /// Deliberately has no `dump_syntax_tree` equivalent: unlike this tool
+    /// (which runs the rule through norma's own validation pipeline,
+    /// including its language allowlist), a raw AST dump would be a
+    /// value-free clone of `ast-grep-mcp`'s own tool -- see this crate's
+    /// "norma vs. ast-grep-mcp" README section and
+    /// .scratch/ast-grep-feature-parity/issues/02-rule-testing-ast-debug-tooling.md.
+    #[tool(
+        description = "Dry-run a candidate ast-grep RuleConfig YAML against example code without registering it -- returns matches (with suggested_fix, if the rule has a fix). For raw AST inspection instead of testing a rule, use ast-grep-mcp's dump_syntax_tree."
+    )]
+    pub async fn test_pattern(
+        &self,
+        Parameters(params): Parameters<TestPatternParams>,
+    ) -> Result<String, ErrorData> {
+        let result =
+            pattern_engine::test_rule(&params.rule, &params.code).map_err(to_invalid_params)?;
+        to_json(&result)
     }
 
     #[tool(description = "Register a new pattern from a full ast-grep RuleConfig YAML")]
@@ -269,6 +307,97 @@ mod tests {
             .expect_err("an unsupported language must not report a passing result");
         assert!(
             err.message.contains("unsupported language"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    // --- test_pattern (TF-891) -----------------------------------------
+
+    #[tokio::test]
+    async fn test_pattern_reports_a_match_without_registering_anything() {
+        let server = test_server().await;
+        let params = Parameters(TestPatternParams {
+            rule: r#"
+id: no-debug-print-rust
+message: Avoid println! in production code
+severity: warning
+language: Rust
+rule:
+  pattern: println!($$$ARGS)
+"#
+            .to_string(),
+            code: "fn main() { println!(\"debug\"); }".to_string(),
+        });
+        let json = server.test_pattern(params).await.unwrap();
+        let result: ValidationResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(result.violations.len(), 1);
+        assert!(!result.passed);
+
+        // Nothing was persisted -- the seeded defaults are still the only
+        // registered patterns.
+        let patterns_json = server.list_patterns().await.unwrap();
+        let patterns: Vec<Pattern> = serde_json::from_str(&patterns_json).unwrap();
+        assert_eq!(patterns.len(), 20);
+    }
+
+    #[tokio::test]
+    async fn test_pattern_reports_suggested_fix_from_the_rules_own_fix() {
+        let server = test_server().await;
+        let params = Parameters(TestPatternParams {
+            rule: r#"
+id: no-unwrap-rust
+message: Avoid unwrap() in production code
+severity: warning
+language: Rust
+rule:
+  pattern: $EXPR.unwrap()
+fix: $EXPR.expect("TODO")
+"#
+            .to_string(),
+            code: "fn main() { value.unwrap(); }".to_string(),
+        });
+        let json = server.test_pattern(params).await.unwrap();
+        let result: ValidationResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            result.violations[0].suggested_fix.as_deref(),
+            Some(r#"value.expect("TODO")"#)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pattern_rejects_malformed_yaml_as_invalid_params() {
+        let server = test_server().await;
+        let params = Parameters(TestPatternParams {
+            rule: "not: valid: yaml: at: all: -".to_string(),
+            code: "fn main() {}".to_string(),
+        });
+        let err = server
+            .test_pattern(params)
+            .await
+            .expect_err("malformed rule YAML must be rejected");
+        assert!(!err.message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_pattern_rejects_a_rule_with_no_id_the_same_way_register_pattern_would() {
+        let server = test_server().await;
+        let params = Parameters(TestPatternParams {
+            rule: r#"
+message: Avoid println! in production code
+severity: warning
+language: Rust
+rule:
+  pattern: println!($$$ARGS)
+"#
+            .to_string(),
+            code: "fn main() {}".to_string(),
+        });
+        let err = server
+            .test_pattern(params)
+            .await
+            .expect_err("a rule with no id must be rejected, mirroring register_pattern");
+        assert!(
+            err.message.contains("non-empty"),
             "unexpected error: {err:?}"
         );
     }

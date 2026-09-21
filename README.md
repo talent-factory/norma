@@ -25,7 +25,7 @@ ast-grep ships its own experimental MCP server, [`ast-grep-mcp`](https://github.
 | Answers | "Where does X occur in this code, and how do I write a rule for it?" | "Does this code violate one of our team's standing rules?" |
 | Rules | ephemeral — built by the AI agent per call, never stored | persistent — registered once via `register_pattern`, enforced on every later call |
 | Implementation | Python, shells out to the `ast-grep` CLI as a subprocess | Rust, links `ast-grep-core`/`-config`/`-language` directly as a library (no subprocess) |
-| Tools | `dump_syntax_tree`, `test_match_code_rule`, `find_code`, `find_code_by_rule` — a search/debug workflow | `validate_pattern_compliance`, `apply_pattern_fix`, `get_pattern_checklist`, `register_pattern`, `list_patterns` — a compliance workflow |
+| Tools | `dump_syntax_tree`, `test_match_code_rule`, `find_code`, `find_code_by_rule` — a search/debug workflow | `validate_pattern_compliance`, `apply_pattern_fix`, `get_pattern_checklist`, `test_pattern`, `register_pattern`, `list_patterns` — a compliance workflow |
 | State | none (SQLite-free) | SQLite-backed `PatternStore`, survives restarts and project switches |
 | Status | explicitly experimental | in production use here, with tests and ADRs (`docs/adr/`) |
 
@@ -170,7 +170,16 @@ register_pattern(
 )
 ```
 
-`register_pattern` only guarantees the YAML *parses* -- not that it matches what you intend (`RegisterPatternError::InvalidRule` rejects malformed YAML before it ever reaches storage, per `src/mcp_server.rs`). Sanity-check the rule against a snippet before relying on it: either with ast-grep-mcp's `test_match_code_rule` (or the plain `ast-grep` CLI) beforehand, or after registering by calling `validate_pattern_compliance` with code you expect it to flag.
+`register_pattern` only guarantees the YAML *parses* -- not that it matches what you intend (`RegisterPatternError::InvalidRule` rejects malformed YAML before it ever reaches storage, per `src/mcp_server.rs`). Sanity-check the rule against a snippet *before* registering it with the `test_pattern` MCP tool -- it runs a rule against example code and reports matches (with `suggested_fix`, if the rule has a `fix:`) without storing anything:
+
+```jsonc
+test_pattern(
+  rule: "id: no-await-in-promise-all\nseverity: error\nlanguage: TypeScript\nmessage: No await in Promise.all\nrule:\n  pattern: await $A\n  inside:\n    pattern: Promise.all($_)\n    stopBy:\n      not: { any: [{ kind: array }, { kind: arguments }] }\nfix: $A\n",
+  code: "await Promise.all([await doA(), doB()])"
+)
+```
+
+`test_pattern` applies the same `id`/`language` checks `register_pattern` does, so a rule it accepts is guaranteed to also be accepted by `register_pattern`. It has no `dump_syntax_tree` equivalent -- for raw AST inspection, use ast-grep-mcp's `dump_syntax_tree` (or the plain `ast-grep` CLI) instead; norma stays complementary to it rather than duplicating it.
 
 ## 🔧 Development
 
