@@ -108,7 +108,7 @@ norma/
 ├── src/
 │   ├── main.rs              # Entry point: wires the CLI to the shared core
 │   ├── lib.rs               # Library exports
-│   ├── cli.rs                # clap Cli/Command, validate_files, resolve_db_path
+│   ├── cli.rs                # clap Cli/Command, validate_files, import_dir, resolve_db_path
 │   ├── models.rs            # Data structures (Pattern, PatternViolation, etc.)
 │   ├── mcp_server.rs        # MCP tool definitions & handlers
 │   ├── pattern_engine.rs    # Pattern matching & validation logic
@@ -184,6 +184,39 @@ test_pattern(
 ```
 
 `test_pattern` applies the same `id`/`language` checks `register_pattern` does, so a rule it accepts is guaranteed to also be accepted by `register_pattern`, and one it rejects would be rejected there too -- before ever reaching storage in either case. It never reads the pattern store, though, so it can't warn you if `rule`'s `id` happens to collide with an already-registered pattern; `register_pattern` will overwrite that pattern silently, same as it always has. It also has no `dump_syntax_tree` equivalent -- for raw AST inspection, use ast-grep-mcp's `dump_syntax_tree` (or the plain `ast-grep` CLI) instead; norma stays complementary to it rather than duplicating it.
+
+### Bulk-importing an existing rule directory
+
+The above works one rule at a time. For a whole directory of existing rules
+at once -- a cloned `sgconfig.yaml` rule directory, or a local checkout of
+[ast-grep's own catalog](https://ast-grep.github.io/catalog/) -- use the
+`import_rules` MCP tool or the `norma import <dir>` CLI subcommand instead
+(TF-894). Both take a `---`-separated multi-document YAML string (or, for
+the CLI, a directory of `.yml`/`.yaml` files, scanned recursively) and
+import every `RuleConfig` document in it:
+
+```jsonc
+import_rules(
+  yaml: "id: no-await-in-promise-all\nseverity: error\nlanguage: TypeScript\n...\n---\nid: another-rule\n...",
+  category: "adopted-from-catalog"
+)
+```
+
+```bash
+norma import --category adopted-from-catalog path/to/rule-directory/
+```
+
+Unlike a single `register_pattern` call, `name`/`description` per document
+are *derived*, not supplied: `name` is the document's own raw `id`,
+`description` its `message` -- there is no per-rule name/description input
+for a bulk import. `category`, if given, applies to every document
+imported by the one call. A document that can't be registered (most
+commonly a `language:` outside the 28 `ast-grep-language` supports) is
+skipped with a reason rather than aborting the whole import -- the result
+lists both `imported` and `skipped`, so a partially-successful import is
+never silently mistaken for a fully clean one. Re-importing an `id` that
+was already registered overwrites it, exactly like `register_pattern`'s
+own upsert -- there is no separate "never overwrite" mode.
 
 ## 🔧 Development
 

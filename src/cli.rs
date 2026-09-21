@@ -50,6 +50,23 @@ pub enum Command {
     },
     /// List every registered pattern.
     ListPatterns,
+    /// Bulk-import every `.yml`/`.yaml` rule file found under a directory
+    /// (TF-894) -- e.g. a cloned `sgconfig.yaml` rule directory, or a local
+    /// checkout of ast-grep's own rule catalog. Wraps
+    /// `PatternStore::import_rules`; see its doc comment for the
+    /// per-document `name`/`description` derivation and skip-with-reason
+    /// semantics.
+    Import {
+        /// Directory to scan recursively for `.yml`/`.yaml` rule files.
+        dir: PathBuf,
+        /// Applied to every pattern imported by this call -- see
+        /// `PatternStore::import_rules`.
+        #[arg(long)]
+        category: Option<String>,
+        /// Print machine-readable JSON instead of human-readable text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// One file's validation outcome, as emitted by `norma validate --json`.
@@ -241,6 +258,92 @@ pub fn render_fix_report(file: &Path, report: &FixReport) -> String {
     out
 }
 
+/// Recursively collects every `.yml`/`.yaml` file under `dir`, sorted for
+/// deterministic output -- mirrors how a cloned `sgconfig.yaml` rule
+/// directory or a checkout of ast-grep's own rule catalog nests rule files
+/// in per-language subdirectories (TF-894, `norma import`'s core file
+/// discovery).
+fn collect_yaml_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir).map_err(|e| anyhow::anyhow!("{}: {e}", dir.display()))? {
+        let entry = entry.map_err(|e| anyhow::anyhow!("{}: {e}", dir.display()))?;
+        let path = entry.path();
+        if path.is_dir() {
+            files.extend(collect_yaml_files(&path)?);
+        } else if matches!(
+            path.extension().and_then(|ext| ext.to_str()),
+            Some("yml" | "yaml")
+        ) {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// Reads every `.yml`/`.yaml` file under `dir` (see `collect_yaml_files`)
+/// and bulk-imports every RuleConfig document they contain via
+/// `PatternStore::import_rules` -- the `norma import <dir>` subcommand's
+/// core (TF-894).
+///
+/// Every file's content is concatenated into one `---`-separated
+/// multi-document YAML string before the single `import_rules` call, so an
+/// `id` repeated across two files in the directory resolves exactly like
+/// `import_rules` already documents for a repeated `id` within one call
+/// (last one wins, per its upsert semantics) -- rather than each file's
+/// import silently overwriting the previous file's result with no way to
+/// tell that happened.
+///
+/// Fails the whole command if `dir` contains no `.yml`/`.yaml` files at
+/// all, or if any one of them can't be read -- consistent with
+/// `validate_files`' "a file that can't be read fails the whole call"
+/// rule. A file that reads fine but contains an invalid rule is *not* a
+/// read failure -- that's `import_rules`'s per-document skip path instead.
+pub async fn import_dir(
+    store: &crate::pattern_store::PatternStore,
+    dir: &Path,
+    category: Option<String>,
+) -> anyhow::Result<crate::pattern_store::ImportResult> {
+    let files = collect_yaml_files(dir)?;
+    if files.is_empty() {
+        anyhow::bail!("{}: no .yml/.yaml files found", dir.display());
+    }
+    let mut yaml = String::new();
+    for file in &files {
+        let content = std::fs::read_to_string(file)
+            .map_err(|e| anyhow::anyhow!("{}: {e}", file.display()))?;
+        if !yaml.is_empty() {
+            yaml.push_str("\n---\n");
+        }
+        yaml.push_str(&content);
+    }
+    Ok(store.import_rules(&yaml, category).await?)
+}
+
+/// Renders an `ImportResult` as one line per imported pattern, one line per
+/// skipped document (with its reason), and a one-line summary -- the
+/// human-readable format `norma import` uses without `--json`.
+pub fn render_import_result(result: &crate::pattern_store::ImportResult) -> String {
+    let mut out = String::new();
+    for pattern in &result.imported {
+        out.push_str(&format!(
+            "imported {} [{}]\n",
+            pattern.id(),
+            pattern.language()
+        ));
+    }
+    for skip in &result.skipped {
+        let name = skip.id.as_deref().unwrap_or("<no id>");
+        out.push_str(&format!("[warning] skipped {name}: {}\n", skip.reason));
+    }
+    out.push_str(&format!(
+        "{} imported, {} skipped",
+        result.imported.len(),
+        result.skipped.len()
+    ));
+    out
+}
+
 /// Decides where norma's SQLite registry lives, in precedence order:
 /// `--db`, then `$NORMA_DB`, then the XDG Base Directory data location
 /// (`$XDG_DATA_HOME/norma/norma.db`, honoring an override the same way
@@ -348,6 +451,39 @@ mod tests {
         assert_eq!(
             Cli::parse_from(["norma", "list-patterns"]).command,
             Command::ListPatterns
+        );
+    }
+
+    #[test]
+    fn parses_import_with_category_and_json() {
+        let cli = Cli::parse_from([
+            "norma",
+            "import",
+            "--category",
+            "bulk-imported",
+            "--json",
+            "rules/",
+        ]);
+        assert_eq!(
+            cli.command,
+            Command::Import {
+                dir: PathBuf::from("rules/"),
+                category: Some("bulk-imported".to_string()),
+                json: true,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_import_without_category() {
+        let cli = Cli::parse_from(["norma", "import", "rules/"]);
+        assert_eq!(
+            cli.command,
+            Command::Import {
+                dir: PathBuf::from("rules/"),
+                category: None,
+                json: false,
+            }
         );
     }
 
@@ -744,5 +880,116 @@ fix: $EXPR.expect("TODO")
             rendered.contains("src/lib.rs:5:3: [warning] fix conflict -- overlapping fixes from a, b were not applied"),
             "got: {rendered}"
         );
+    }
+
+    // --- import (TF-894) ------------------------------------------------
+
+    use crate::pattern_store::PatternStore;
+
+    async fn empty_store() -> PatternStore {
+        let dir = tempfile::tempdir().unwrap();
+        let store = PatternStore::new(dir.path().join("norma-test.db"))
+            .await
+            .unwrap();
+        std::mem::forget(dir);
+        store
+    }
+
+    const RUST_RULE: &str = r#"
+id: no-debug-print-rust
+message: Avoid println! in production code
+severity: warning
+language: Rust
+rule:
+  pattern: println!($$$ARGS)
+"#;
+
+    const GO_RULE: &str = r#"
+id: no-debug-print-go
+message: Avoid fmt.Println in production code
+severity: warning
+language: Go
+rule:
+  pattern: fmt.Println($$$ARGS)
+"#;
+
+    #[test]
+    fn collect_yaml_files_finds_yml_and_yaml_recursively_and_ignores_other_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.yaml"), "").unwrap();
+        std::fs::write(dir.path().join("b.yml"), "").unwrap();
+        std::fs::write(dir.path().join("README.md"), "").unwrap();
+        let nested = dir.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::write(nested.join("c.yaml"), "").unwrap();
+
+        let files = collect_yaml_files(dir.path()).unwrap();
+        let names: Vec<_> = files
+            .iter()
+            .map(|f| f.file_name().unwrap().to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(names, vec!["a.yaml", "b.yml", "c.yaml"]);
+    }
+
+    #[tokio::test]
+    async fn import_dir_imports_every_yaml_file_under_the_directory() {
+        let store = empty_store().await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("rust.yaml"), RUST_RULE).unwrap();
+        std::fs::write(dir.path().join("go.yaml"), GO_RULE).unwrap();
+
+        let result = import_dir(&store, dir.path(), Some("bulk".to_string()))
+            .await
+            .unwrap();
+
+        assert_eq!(result.imported.len(), 2);
+        assert!(result.skipped.is_empty());
+        assert!(result
+            .imported
+            .iter()
+            .all(|p| p.category.as_deref() == Some("bulk")));
+    }
+
+    #[tokio::test]
+    async fn import_dir_fails_when_the_directory_has_no_yaml_files() {
+        let store = empty_store().await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("README.md"), "not a rule").unwrap();
+
+        let err = import_dir(&store, dir.path(), None).await.unwrap_err();
+        assert!(
+            err.to_string().contains("no .yml/.yaml files found"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn render_import_result_lists_imported_and_skipped_with_a_summary() {
+        use crate::pattern_store::{ImportResult, SkippedRule};
+
+        let now = chrono::Utc::now();
+        let pattern = Pattern::from_rule(
+            "no-debug-print-rust".to_string(),
+            "d".to_string(),
+            None,
+            RUST_RULE.to_string(),
+            true,
+            now,
+            now,
+        )
+        .unwrap();
+        let result = ImportResult {
+            imported: vec![pattern],
+            skipped: vec![SkippedRule {
+                id: Some("display-in-cobol".to_string()),
+                reason: "unsupported language: Cobol".to_string(),
+            }],
+        };
+        let rendered = render_import_result(&result);
+        assert!(rendered.contains("imported no-debug-print-rust [rust]"));
+        assert!(
+            rendered.contains("[warning] skipped display-in-cobol: unsupported language: Cobol")
+        );
+        assert!(rendered.contains("1 imported, 1 skipped"));
     }
 }

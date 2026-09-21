@@ -37,6 +37,12 @@ clap = { version = "4", features = ["derive"] }
 # Data serialization.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Already pulled in transitively by ast-grep-config (pinned above); made
+# explicit here since `pattern_store::import_rules` (TF-894) needs to split
+# a multi-document YAML string into its individual documents itself --
+# `ast_grep_config::from_yaml_string` does that internally but only
+# surfaces the parsed `RuleConfig`s, not each document's own raw text.
+serde_yaml = "0.9"
 
 # Database.
 sqlx = { version = "0.9", features = ["sqlite", "runtime-tokio", "chrono"] }

@@ -60,18 +60,31 @@ static LANGUAGE_KEYS: LazyLock<Vec<(SupportLang, String)>> = LazyLock::new(|| {
 pub static SUPPORTED_LANGUAGES: LazyLock<Vec<&'static str>> =
     LazyLock::new(|| LANGUAGE_KEYS.iter().map(|(_, key)| key.as_str()).collect());
 
+/// Parses a full, possibly multi-document (`---`-separated) ast-grep
+/// RuleConfig YAML string and returns every document it contains, in
+/// document order -- the same convention a cloned `sgconfig.yaml` rule
+/// directory or ast-grep's own rule catalog uses. `parse_rule` (below) is
+/// this with only the first document kept; this is the basis for
+/// `PatternStore::import_rules`'s bulk import (TF-894), which needs every
+/// document, not just the first.
+pub fn parse_rules(rule_yaml: &str) -> anyhow::Result<Vec<RuleConfig<SupportLang>>> {
+    let globals = GlobalRules::default();
+    let configs = from_yaml_string::<SupportLang>(rule_yaml, &globals)?;
+    if configs.is_empty() {
+        anyhow::bail!("rule YAML did not contain a RuleConfig document");
+    }
+    Ok(configs)
+}
+
 /// Parses a full ast-grep RuleConfig YAML document (see docs/adr/0002.md)
 /// and returns the compiled rule, or an error if the YAML is malformed or
 /// the rule has no matchable AST kinds. Used both to run a pattern
 /// (`validate`, below) and to validate one before it's persisted
-/// (`PatternStore::register_pattern` in `pattern_store.rs`).
+/// (`PatternStore::register_pattern` in `pattern_store.rs`). Discards every
+/// document past the first -- see `parse_rules` for the multi-document
+/// variant.
 pub fn parse_rule(rule_yaml: &str) -> anyhow::Result<RuleConfig<SupportLang>> {
-    let globals = GlobalRules::default();
-    let mut configs = from_yaml_string::<SupportLang>(rule_yaml, &globals)?;
-    if configs.is_empty() {
-        anyhow::bail!("rule YAML did not contain a RuleConfig document");
-    }
-    Ok(configs.remove(0))
+    Ok(parse_rules(rule_yaml)?.remove(0))
 }
 
 /// norma's own canonical language key for a `SupportLang`, matching the
@@ -919,6 +932,25 @@ rule:
     #[test]
     fn parse_rule_rejects_malformed_yaml() {
         assert!(parse_rule("not: valid: yaml: at: all: -").is_err());
+    }
+
+    #[test]
+    fn parse_rules_returns_every_document_in_a_multi_document_yaml() {
+        let two_rules = format!("{RUST_NO_DEBUG_PRINT}---\n{RUST_NO_UNWRAP}");
+        let configs = parse_rules(&two_rules).unwrap();
+        assert_eq!(configs.len(), 2);
+        assert_eq!(configs[0].id, "no-debug-print-rust");
+        assert_eq!(configs[1].id, "no-unwrap-rust");
+    }
+
+    #[test]
+    fn parse_rule_keeps_only_the_first_document_of_a_multi_document_yaml() {
+        // `parse_rule` (single-document) must still behave exactly as
+        // before `parse_rules` was introduced -- discarding every document
+        // past the first, not erroring on one.
+        let two_rules = format!("{RUST_NO_DEBUG_PRINT}---\n{RUST_NO_UNWRAP}");
+        let config = parse_rule(&two_rules).unwrap();
+        assert_eq!(config.id, "no-debug-print-rust");
     }
 
     #[test]

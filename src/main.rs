@@ -93,6 +93,25 @@ async fn main() -> anyhow::Result<()> {
                 );
             }
         }
+        Command::Import {
+            dir,
+            category,
+            json,
+        } => {
+            let result = cli::import_dir(&store, &dir, category).await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("{}", cli::render_import_result(&result));
+            }
+            // A skipped document is a loud, visible warning in the output
+            // above -- but `norma import` run non-interactively (CI, a
+            // scripted bulk-adoption) must not silently look like a clean
+            // exit when part of the batch was actually rejected.
+            if !result.skipped.is_empty() {
+                std::process::exit(1);
+            }
+        }
     }
     Ok(())
 }

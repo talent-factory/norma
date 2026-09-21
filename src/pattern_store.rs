@@ -1,6 +1,7 @@
 use crate::models::{Pattern, Severity};
 use anyhow::Result;
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions, SqliteRow};
 use sqlx::Row;
 use std::path::Path;
@@ -189,6 +190,134 @@ impl PatternStore {
         }
         Ok(())
     }
+
+    /// Bulk-imports every RuleConfig document in `yaml` (a `---`-separated
+    /// multi-document YAML string -- e.g. a cloned `sgconfig.yaml` rule
+    /// directory's files concatenated, or a local checkout of ast-grep's
+    /// own rule catalog; TF-894, see
+    /// .scratch/ast-grep-feature-parity/issues/04-bulk-import-existing-rules.md).
+    /// `category`, if given, is applied to every pattern imported by this
+    /// one call -- ast-grep's own rule YAML has no per-document category.
+    ///
+    /// Mirrors `register_pattern`'s derivation and upsert semantics for
+    /// each document: `name` <- the document's own raw `id:` field
+    /// (unhumanized), `description` <- its raw `message:` field, and
+    /// importing an `id` that already exists overwrites that row exactly
+    /// like `register_pattern` does (`ON CONFLICT(id) DO UPDATE`, see
+    /// `save_pattern`) -- there is no separate "never overwrite" mode.
+    ///
+    /// A document that fails to register -- an unsupported `language:`, a
+    /// missing/empty `id`, or any other reason `register_pattern` would
+    /// reject it for -- is skipped, with the reason recorded in the
+    /// result's `skipped` list, rather than aborting the whole import: one
+    /// bad or not-yet-supported file in an otherwise-good rule directory
+    /// must not block every other rule in it. Only a genuine storage
+    /// failure (SQLite I/O) aborts the batch early, returned as `Err` --
+    /// unlike a per-document problem, skipping the one document can't fix
+    /// that.
+    ///
+    /// `yaml` failing to split into documents at all (a YAML syntax error
+    /// no document boundary can recover from) fails the whole call the
+    /// same way -- there is no per-document reason to attach when
+    /// individual documents were never successfully separated.
+    pub async fn import_rules(
+        &self,
+        yaml: &str,
+        category: Option<String>,
+    ) -> std::result::Result<ImportResult, RegisterPatternError> {
+        let documents =
+            split_yaml_documents(yaml).map_err(|e| RegisterPatternError::InvalidRule(e.into()))?;
+
+        let mut imported = Vec::with_capacity(documents.len());
+        let mut skipped = Vec::new();
+        for doc in documents {
+            let name = doc.id.clone().unwrap_or_default();
+            let description = doc.message.unwrap_or_default();
+            match self
+                .register_pattern(name, description, category.clone(), doc.text)
+                .await
+            {
+                Ok(pattern) => imported.push(pattern),
+                Err(RegisterPatternError::InvalidRule(err)) => {
+                    // `{err:?}` (the full anyhow chain), not `{err}`/
+                    // `.to_string()` (just the top-level "Fail to parse
+                    // yaml as RuleConfig" wrapper message) -- see
+                    // `mcp_server::to_tool_error`'s doc comment for why the
+                    // actually-useful detail (e.g. "language: Cobol is not
+                    // supported!") lives one level down the chain.
+                    skipped.push(SkippedRule {
+                        id: doc.id,
+                        reason: format!("{err:?}"),
+                    });
+                }
+                Err(err @ RegisterPatternError::Storage(_)) => return Err(err),
+            }
+        }
+        Ok(ImportResult { imported, skipped })
+    }
+}
+
+/// One YAML document out of `import_rules`' multi-document input, split via
+/// `split_yaml_documents`. `id`/`message` are read straight from the
+/// document's own deserialized `serde_yaml::Value` -- not from a validated
+/// `RuleConfig` -- so they're the "raw" values `import_rules`'s doc comment
+/// promises for `name`/`description`, and are still available to name a
+/// document in a `SkippedRule` even when it goes on to fail registration
+/// (e.g. an unsupported `language:`).
+struct YamlDocument {
+    text: String,
+    id: Option<String>,
+    message: Option<String>,
+}
+
+/// Splits a multi-document YAML string into one [`YamlDocument`] per
+/// document, re-serializing each back to its own single-document YAML text
+/// (via a `serde_yaml::Value` round-trip) so it can be handed straight to
+/// `register_pattern`, exactly like a single already-adopted rule would be.
+/// Reuses `serde_yaml::Deserializer`'s own document-boundary detection
+/// (the same one `ast_grep_config::from_yaml_string` uses internally)
+/// rather than re-implementing `---`-splitting by hand, which would risk
+/// disagreeing with it on an edge case (e.g. `---` appearing inside an
+/// indented block scalar).
+fn split_yaml_documents(yaml: &str) -> std::result::Result<Vec<YamlDocument>, serde_yaml::Error> {
+    serde_yaml::Deserializer::from_str(yaml)
+        .map(|doc| {
+            let value = serde_yaml::Value::deserialize(doc)?;
+            let id = value
+                .get("id")
+                .and_then(serde_yaml::Value::as_str)
+                .map(str::to_string);
+            let message = value
+                .get("message")
+                .and_then(serde_yaml::Value::as_str)
+                .map(str::to_string);
+            let text = serde_yaml::to_string(&value)?;
+            Ok(YamlDocument { text, id, message })
+        })
+        .collect()
+}
+
+/// One document's outcome inside `PatternStore::import_rules`'s bulk
+/// import that could not be registered -- `id` is best-effort (see
+/// `YamlDocument`'s doc comment: read from the raw document, not a
+/// validated `RuleConfig`), so it may be `None` for a document with no
+/// `id:` field at all.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(test, derive(Deserialize))]
+pub struct SkippedRule {
+    pub id: Option<String>,
+    pub reason: String,
+}
+
+/// `PatternStore::import_rules`'s result: every document that was
+/// successfully registered, and every one that was skipped and why. Never
+/// partially silent -- a bulk import of N documents where M didn't
+/// register still accounts for all N, not just the ones that succeeded.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(test, derive(Deserialize))]
+pub struct ImportResult {
+    pub imported: Vec<Pattern>,
+    pub skipped: Vec<SkippedRule>,
 }
 
 /// Reconstructs a `Pattern` from a stored row without re-parsing `rule` --
@@ -230,6 +359,17 @@ mod tests {
 
     const RUST_RULE: &str = r#"
 id: no-debug-print-rust
+message: Avoid println! in production code
+severity: warning
+language: Rust
+rule:
+  pattern: println!($$$ARGS)
+"#;
+
+    // A rule that parses as YAML but has no top-level `id` (it defaults to
+    // `""`), so `check_registerable` must reject it -- see
+    // `import_rules_rejects_a_document_with_no_id_and_reports_none_as_its_skip_id`.
+    const RULE_WITHOUT_ID: &str = r#"
 message: Avoid println! in production code
 severity: warning
 language: Rust
@@ -430,5 +570,93 @@ rule:
             customized.name, "My Custom Name",
             "seed_defaults must never overwrite a row that already exists"
         );
+    }
+
+    #[tokio::test]
+    async fn import_rules_registers_every_document_deriving_name_and_description_from_id_and_message(
+    ) {
+        let store = test_store().await;
+        let yaml = format!("{RUST_RULE}---\n{GO_RULE}");
+        let result = store.import_rules(&yaml, None).await.unwrap();
+
+        assert_eq!(result.imported.len(), 2);
+        assert!(result.skipped.is_empty());
+
+        let rust = result
+            .imported
+            .iter()
+            .find(|p| p.id() == "no-debug-print-rust")
+            .unwrap();
+        // TF-894: name <- the rule's own raw `id`, description <- its
+        // `message`, neither humanized nor otherwise reshaped.
+        assert_eq!(rust.name, "no-debug-print-rust");
+        assert_eq!(rust.description, "Avoid println! in production code");
+
+        let go = result
+            .imported
+            .iter()
+            .find(|p| p.id() == "no-debug-print-go")
+            .unwrap();
+        assert_eq!(go.name, "no-debug-print-go");
+        assert_eq!(go.description, "Avoid fmt.Println in production code");
+    }
+
+    #[tokio::test]
+    async fn import_rules_applies_the_given_category_to_every_document() {
+        let store = test_store().await;
+        let yaml = format!("{RUST_RULE}---\n{GO_RULE}");
+        let result = store
+            .import_rules(&yaml, Some("bulk-imported".to_string()))
+            .await
+            .unwrap();
+
+        assert!(result
+            .imported
+            .iter()
+            .all(|p| p.category.as_deref() == Some("bulk-imported")));
+    }
+
+    #[tokio::test]
+    async fn import_rules_skips_an_unsupported_language_with_a_reason_but_imports_the_rest() {
+        let store = test_store().await;
+        let yaml = format!("{RUST_RULE}---\n{COBOL_RULE}");
+        let result = store.import_rules(&yaml, None).await.unwrap();
+
+        assert_eq!(result.imported.len(), 1);
+        assert_eq!(result.imported[0].id(), "no-debug-print-rust");
+
+        assert_eq!(result.skipped.len(), 1);
+        let skip = &result.skipped[0];
+        assert_eq!(skip.id.as_deref(), Some("no-debug-print-cobol"));
+        assert!(
+            skip.reason.contains("Cobol"),
+            "expected the skip reason to name the rejected language, got: {}",
+            skip.reason
+        );
+
+        // The one rejected document must never have been written.
+        assert_eq!(store.list_all_patterns().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn import_rules_upserts_on_a_repeated_id_like_register_pattern_does() {
+        let store = test_store().await;
+        store.import_rules(RUST_RULE, None).await.unwrap();
+        // Re-importing the same id (e.g. a re-run against an updated
+        // external rule file) must overwrite, not duplicate.
+        let result = store.import_rules(RUST_RULE, None).await.unwrap();
+
+        assert_eq!(result.imported.len(), 1);
+        assert_eq!(store.list_all_patterns().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn import_rules_rejects_a_document_with_no_id_and_reports_none_as_its_skip_id() {
+        let store = test_store().await;
+        let result = store.import_rules(RULE_WITHOUT_ID, None).await.unwrap();
+
+        assert!(result.imported.is_empty());
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.skipped[0].id, None);
     }
 }
