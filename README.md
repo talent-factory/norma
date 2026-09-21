@@ -29,7 +29,7 @@ ast-grep ships its own experimental MCP server, [`ast-grep-mcp`](https://github.
 | Answers | "Where does X occur in this code, and how do I write a rule for it?" | "Does this code violate one of our team's standing rules?" |
 | Rules | ephemeral — built by the AI agent per call, never stored | persistent — registered once via `register_pattern`, enforced on every later call |
 | Implementation | Python, shells out to the `ast-grep` CLI as a subprocess | Rust, links `ast-grep-core`/`-config`/`-language` directly as a library (no subprocess) |
-| Tools | `dump_syntax_tree`, `test_match_code_rule`, `find_code`, `find_code_by_rule` — a search/debug workflow | `validate_pattern_compliance`, `apply_pattern_fix`, `get_pattern_checklist`, `test_pattern`, `register_pattern`, `list_patterns` — a compliance workflow |
+| Tools | `dump_syntax_tree`, `test_match_code_rule`, `find_code`, `find_code_by_rule` — a search/debug workflow | `validate_pattern_compliance`, `apply_pattern_fix`, `get_pattern_checklist`, `test_pattern`, `register_pattern`, `import_rules`, `list_patterns` — a compliance workflow |
 | State | none (SQLite-free) | SQLite-backed `PatternStore`, survives restarts and project switches |
 | Status | explicitly experimental | in production use here, with tests and ADRs (`docs/adr/`) |
 
@@ -214,9 +214,35 @@ imported by the one call. A document that can't be registered (most
 commonly a `language:` outside the 28 `ast-grep-language` supports) is
 skipped with a reason rather than aborting the whole import -- the result
 lists both `imported` and `skipped`, so a partially-successful import is
-never silently mistaken for a fully clean one. Re-importing an `id` that
-was already registered overwrites it, exactly like `register_pattern`'s
-own upsert -- there is no separate "never overwrite" mode.
+never silently mistaken for a fully clean one. A document with neither an
+`id:` nor a `rule:` key at all (an `sgconfig.yaml`, a stray CI workflow
+`.yml` a directory scan swept up, ...) is silently excluded from both
+lists instead -- it never looked like a rule to begin with. Re-importing
+an `id` that was already registered overwrites it, exactly like
+`register_pattern`'s own upsert -- there is no separate "never overwrite"
+mode; re-importing the same `id` twice in one call keeps only the last
+version.
+
+`norma import`'s exit status is non-zero if anything was skipped -- same
+rule as `norma validate`'s "non-zero if any file has violations" (see
+[Usage](#usage) above). Add `--json` for machine-readable output (an
+`ImportResult` object with `imported`/`skipped` arrays, the same shape
+`import_rules` returns). The CLI subcommand makes one `import_rules` call
+*per file* under the directory (not one call over every file's content
+concatenated together), so a genuine YAML syntax error in one file only
+skips that one file rather than aborting the whole directory; each skip
+reason is prefixed with its source file's path.
+
+Two things worth knowing before relying on a bulk import:
+
+- The imported `rule` text is a re-serialized, not byte-identical, copy of
+  the source document -- semantically equivalent, but formatting, key
+  order, and comments are not preserved the way a single `register_pattern`
+  call stores `rule` verbatim.
+- ast-grep's `utilDirs`/global "utility rule" mechanism (`matches:
+  <global-util>`) isn't supported yet -- a rule directory that relies on it
+  will have those rules, and the utility definitions themselves, silently
+  excluded (they have neither `id:` nor `rule:` in the shape this expects).
 
 ## 🔧 Development
 

@@ -107,8 +107,10 @@ async fn main() -> anyhow::Result<()> {
             // A skipped document is a loud, visible warning in the output
             // above -- but `norma import` run non-interactively (CI, a
             // scripted bulk-adoption) must not silently look like a clean
-            // exit when part of the batch was actually rejected.
-            if !result.skipped.is_empty() {
+            // exit when part of the batch was actually rejected. See
+            // `cli::import_should_fail`'s doc comment for why this is a
+            // pulled-out, directly testable function rather than inline.
+            if cli::import_should_fail(&result) {
                 std::process::exit(1);
             }
         }

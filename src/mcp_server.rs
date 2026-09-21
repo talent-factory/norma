@@ -638,6 +638,30 @@ rule:
         );
     }
 
+    /// `ImportRulesParams::category` reuses the exact same
+    /// `#[serde(default)]` + `optional_string_schema` combination
+    /// `RegisterPatternParams::category` does (see that field's doc
+    /// comment), for the same reason -- so it needs the same pin, or a
+    /// future schemars upgrade/cleanup could silently reintroduce the MCP
+    /// Inspector portability warning here without the sibling test above
+    /// catching it.
+    #[test]
+    fn import_rules_schema_keeps_category_optional_and_portable() {
+        let schema = serde_json::to_value(schemars::schema_for!(ImportRulesParams)).unwrap();
+
+        let category = &schema["properties"]["category"];
+        assert!(
+            category["anyOf"].is_array() && category["type"].is_null(),
+            "category must render as anyOf, not a `type` array: {category}"
+        );
+
+        let required = schema["required"].as_array().unwrap();
+        assert!(
+            !required.iter().any(|field| field == "category"),
+            "category must stay out of `required`: {required:?}"
+        );
+    }
+
     // --- apply_pattern_fix (TF-890) -----------------------------------
 
     async fn register_unwrap_fixer(server: &NormaServer) {
