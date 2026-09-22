@@ -1,0 +1,51 @@
+name: Changelog
+
+# Regenerates CHANGELOG.md from the full commit history whenever `main`
+# moves -- in practice, whenever a PR from `develop` is merged (GitHub's
+# merge button pushes a merge commit to `main`, which is exactly a `push`
+# event on this branch; there's no separate "PR merged" trigger needed).
+#
+# `paths-ignore` on the trigger, not just a run-time guard, is what stops
+# this workflow's own commit (touching only CHANGELOG.md) from triggering
+# itself again -- GitHub skips *starting* the workflow for a push that only
+# touches ignored paths, so there's no infinite loop to guard against
+# inside the job at all.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - CHANGELOG.md
+
+permissions:
+  contents: write
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          # git-cliff needs the full history, not just the latest commit,
+          # to build the changelog from every commit ever made.
+          fetch-depth: 0
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --verbose
+        env:
+          OUTPUT: CHANGELOG.md
+
+      - name: Commit and push CHANGELOG.md
+        run: |
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "CHANGELOG.md unchanged, nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "docs: regenerate CHANGELOG.md via git-cliff"
+          git push

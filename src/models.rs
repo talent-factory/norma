@@ -73,7 +73,10 @@ pub struct Pattern {
     pub description: String,
     /// Free-text grouping, e.g. `"code-quality"`, `"creational"`. Not a fixed enum.
     pub category: Option<String>,
-    /// norma's canonical language key: `"java"` | `"python"` | `"rust"` | `"typescript"`.
+    /// norma's canonical language key -- see `pattern_engine::language_key`.
+    /// Not limited to `"java"`/`"python"`/`"rust"`/`"typescript"`: any of
+    /// the 28 languages `ast-grep-language` supports is valid since TF-893,
+    /// though those four are the only ones with shipped default patterns.
     language: String,
     /// Derived from the parsed `rule` YAML when the pattern was registered.
     severity: Severity,
@@ -148,6 +151,14 @@ pub struct PatternViolation {
     pub location: CodeLocation,
     pub matched_text: String,
     pub message: String,
+    /// The replacement text ast-grep's `Fixer::generate_replacement` would
+    /// produce for this match, if the pattern's rule YAML has a `fix:`.
+    /// Always populated when a fixer exists, independent of whether
+    /// `pattern_engine::apply_fixes` would actually apply it -- see TF-890:
+    /// "Anzeigen" (this field) and "Anwenden" (`apply_fixes`) are separate
+    /// concerns, so a fix that would conflict with another match still
+    /// shows up here.
+    pub suggested_fix: Option<String>,
 }
 
 /// A position ast-grep matched at. `line` and `column` are zero-based, as
@@ -181,6 +192,42 @@ pub struct ValidationResult {
     /// that were skipped because their stored `rule` no longer parses.
     pub checked_patterns: usize,
     pub duration_ms: u128,
+}
+
+/// A cluster of two or more different patterns' fix ranges that overlap on
+/// the same code -- see `pattern_engine::apply_fixes`. `location.file` is
+/// always `None` here and nothing currently populates it: `apply_fixes`
+/// only ever sees `code: String`, never a path, and unlike
+/// `PatternViolation.location` there is no later step that attaches one --
+/// `cli::fix_files`/`render_fix_report` thread the real file path
+/// separately (as their own `file: &Path` argument) rather than filling in
+/// this field.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FixConflict {
+    pub pattern_ids: Vec<String>,
+    pub location: CodeLocation,
+}
+
+/// The result of applying every enabled pattern's `fix`/`fixer` for one
+/// language against one piece of code -- see `pattern_engine::apply_fixes`.
+/// Shared by the CLI's `norma validate --fix` (writes `fixed_source` back
+/// to the file) and the MCP `apply_pattern_fix` tool (returns it, never
+/// touches the filesystem), per TF-890's per-surface split.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FixResult {
+    pub fixed_source: String,
+    /// How many matches' fixes were actually applied. Excludes both
+    /// patterns without a `fix:` and matches dropped due to a conflict.
+    pub applied_count: usize,
+    /// Fail-safe: neither side of a conflicting pair (or larger cluster) of
+    /// overlapping fix ranges is applied, rather than guessing a winner --
+    /// see `pattern_engine::apply_fixes`'s doc comment.
+    pub conflicts: Vec<FixConflict>,
+    /// `(pattern_id, parse error)` for every enabled pattern whose stored
+    /// `rule` no longer parses -- these were skipped, not silently
+    /// dropped. Distinct from a pattern with no `fix:` at all, which is
+    /// expected and never appears here.
+    pub skipped_rules: Vec<(String, String)>,
 }
 
 #[cfg(test)]

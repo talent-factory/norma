@@ -86,9 +86,13 @@ norma validate --language rust --json src/*.rs
 ```
 
 The exit status is non-zero if any file has violations — which is what
-makes it usable as a pre-commit hook. Supported languages are `java`,
-`python`, `rust` and `typescript`; anything else is a hard error rather
-than a silent pass.
+makes it usable as a pre-commit hook. `--language` accepts any of the 28
+languages `ast-grep-language` supports (e.g. `go`, `css`, `markdown`, ...,
+not just `java`/`python`/`rust`/`typescript`); anything else is a hard
+error rather than a silent pass. Default patterns currently only ship
+for `java`/`python`/`rust`/`typescript`, though -- validating a file in
+one of the other 24 languages succeeds but reports "no enabled patterns
+are registered for language ..." rather than "no violations".
 
 ## 6. Run the MCP server
 
@@ -132,9 +136,11 @@ over every staged `.rs` file on each commit.
 **`norma: command not found`** — you skipped `cargo install --path .`, or
 `~/.cargo/bin` is not on your `PATH`.
 
-**`Error: unsupported language: "go"`** — norma's MVP set covers Java,
-Python, Rust and TypeScript only. This is deliberate: a language with no
-patterns would otherwise report a meaningless "no violations".
+**`Error: unsupported language: "cobol"`** — norma supports every
+language `ast-grep-language` ships (28 total; see the error's own
+"norma supports: ..." list), but nothing outside that set. This is
+deliberate: a language with no patterns would otherwise report a
+meaningless "no violations" instead of erroring loudly.
 
 **`norma serve` prints nothing** — expected. It is an stdio MCP server.
 Use `RUST_LOG=info norma serve` to see its (stderr) logs.

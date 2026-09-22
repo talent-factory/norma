@@ -8,8 +8,12 @@
 ## 🎯 Features
 
 - ✅ **Pattern Validation** — Check code against registered design patterns
-- ✅ **Multi-Language Support** — Java, Python, Rust and TypeScript (an
-  unsupported `--language` is rejected, never silently skipped)
+- ✅ **Multi-Language Support** — every language `ast-grep-language` ships
+  (28 in total: Java, Python, Rust, TypeScript, Go, C, C++, ... — an
+  unsupported or misspelled `--language` is rejected, never silently
+  skipped). Default patterns currently ship for Java, Python, Rust and
+  TypeScript; the rest are registrable via `register_pattern` but have no
+  patterns out of the box.
 - ✅ **MCP Integration** — Works with Claude Code, Cursor, and other MCP clients
 - ✅ **Persistent Storage** — SQLite-backed pattern registry
 - ✅ **Real-Time Feedback** — Instant violation detection with file:line:column locations
@@ -25,7 +29,7 @@ ast-grep ships its own experimental MCP server, [`ast-grep-mcp`](https://github.
 | Answers | "Where does X occur in this code, and how do I write a rule for it?" | "Does this code violate one of our team's standing rules?" |
 | Rules | ephemeral — built by the AI agent per call, never stored | persistent — registered once via `register_pattern`, enforced on every later call |
 | Implementation | Python, shells out to the `ast-grep` CLI as a subprocess | Rust, links `ast-grep-core`/`-config`/`-language` directly as a library (no subprocess) |
-| Tools | `dump_syntax_tree`, `test_match_code_rule`, `find_code`, `find_code_by_rule` — a search/debug workflow | `validate_pattern_compliance`, `get_pattern_checklist`, `register_pattern`, `list_patterns` — a compliance workflow |
+| Tools | `dump_syntax_tree`, `test_match_code_rule`, `find_code`, `find_code_by_rule` — a search/debug workflow | `validate_pattern_compliance`, `apply_pattern_fix`, `get_pattern_checklist`, `test_pattern`, `register_pattern`, `import_rules`, `list_patterns` — a compliance workflow |
 | State | none (SQLite-free) | SQLite-backed `PatternStore`, survives restarts and project switches |
 | Status | explicitly experimental | in production use here, with tests and ADRs (`docs/adr/`) |
 
@@ -53,6 +57,19 @@ so shell globs and `pre-commit`'s staged-file list both work):
 norma validate --language rust src/main.rs
 norma validate --language rust --json src/*.rs
 ```
+
+Rewrite files in-place with every non-conflicting pattern fix applied (like
+`eslint --fix`/`biome --fix`), then report what's left:
+
+```bash
+norma validate --language rust --fix src/main.rs
+```
+
+There's no dry-run mode in v1 -- keeping a clean git working tree beforehand
+so you can review or revert the rewrite is on you, not enforced by norma.
+If two patterns' fixes overlap on the same code, *neither* is applied and a
+`[warning] fix conflict` line is printed instead (fail-safe over guessing a
+winner).
 
 Exit status is non-zero if *any* file has violations.
 
@@ -91,7 +108,7 @@ norma/
 ├── src/
 │   ├── main.rs              # Entry point: wires the CLI to the shared core
 │   ├── lib.rs               # Library exports
-│   ├── cli.rs                # clap Cli/Command, validate_files, resolve_db_path
+│   ├── cli.rs                # clap Cli/Command, validate_files, import_dir, resolve_db_path
 │   ├── models.rs            # Data structures (Pattern, PatternViolation, etc.)
 │   ├── mcp_server.rs        # MCP tool definitions & handlers
 │   ├── pattern_engine.rs    # Pattern matching & validation logic
@@ -128,7 +145,7 @@ Register one via the `register_pattern` MCP tool, or in Rust via `PatternStore::
 
 ### Adopting an existing ast-grep rule
 
-Because `rule` stores ast-grep's `RuleConfig` YAML verbatim (see [ADR 0002](docs/adr/0002-pattern-single-language-full-rule-config.md)), a rule documented in [ast-grep's own catalog](https://ast-grep.github.io/catalog/), produced by `ast-grep-mcp`'s `test_match_code_rule`, or copied from `ast-grep --pattern` CLI output needs no reshaping to become a norma `Pattern` -- only its `language:` value may need to change to whichever of norma's four supported languages it belongs to (`Java` | `Python` | `Rust` | `TypeScript`).
+Because `rule` stores ast-grep's `RuleConfig` YAML verbatim (see [ADR 0002](docs/adr/0002-pattern-single-language-full-rule-config.md)), a rule documented in [ast-grep's own catalog](https://ast-grep.github.io/catalog/), produced by `ast-grep-mcp`'s `test_match_code_rule`, or copied from `ast-grep --pattern` CLI output needs no reshaping to become a norma `Pattern` -- its `language:` value just needs to be one of the 28 languages `ast-grep-language` supports (norma rejects everything else loudly, never silently matching zero patterns). Default patterns currently ship for only Java, Python, Rust and TypeScript; the other 24 are registrable the same way, just without a starter set of their own.
 
 Take this rule, unmodified from ast-grep's catalog:
 
@@ -146,7 +163,7 @@ rule:
 fix: $A
 ```
 
-Swap `language: JavaScript` for `language: TypeScript` (norma's four canonical keys are `java`/`python`/`rust`/`typescript`; `TypeScript`'s grammar is a superset of the plain-JS pattern here) and pass the whole document through `register_pattern` unchanged otherwise:
+`language: JavaScript` is registrable as-is since TF-893 -- but this example swaps it for `language: TypeScript` anyway (`TypeScript`'s grammar is a superset of the plain-JS pattern here, so the same rule also catches TS/TSX code, and norma ships default patterns for `typescript`, not `javascript`) and passes the whole document through `register_pattern` unchanged otherwise:
 
 ```jsonc
 register_pattern(
@@ -157,7 +174,75 @@ register_pattern(
 )
 ```
 
-`register_pattern` only guarantees the YAML *parses* -- not that it matches what you intend (`RegisterPatternError::InvalidRule` rejects malformed YAML before it ever reaches storage, per `src/mcp_server.rs`). Sanity-check the rule against a snippet before relying on it: either with ast-grep-mcp's `test_match_code_rule` (or the plain `ast-grep` CLI) beforehand, or after registering by calling `validate_pattern_compliance` with code you expect it to flag.
+`register_pattern` only guarantees the YAML *parses* -- not that it matches what you intend (`RegisterPatternError::InvalidRule` rejects malformed YAML before it ever reaches storage, per `src/mcp_server.rs`). Sanity-check the rule against a snippet *before* registering it with the `test_pattern` MCP tool -- it runs a rule against example code and reports matches (with `suggested_fix`, if the rule has a `fix:`) without storing anything:
+
+```jsonc
+test_pattern(
+  rule: "id: no-await-in-promise-all\nseverity: error\nlanguage: TypeScript\nmessage: No await in Promise.all\nrule:\n  pattern: await $A\n  inside:\n    pattern: Promise.all($_)\n    stopBy:\n      not: { any: [{ kind: array }, { kind: arguments }] }\nfix: $A\n",
+  code: "await Promise.all([await doA(), doB()])"
+)
+```
+
+`test_pattern` applies the same `id`/`language` checks `register_pattern` does, so a rule it accepts is guaranteed to also be accepted by `register_pattern`, and one it rejects would be rejected there too -- before ever reaching storage in either case. It never reads the pattern store, though, so it can't warn you if `rule`'s `id` happens to collide with an already-registered pattern; `register_pattern` will overwrite that pattern silently, same as it always has. It also has no `dump_syntax_tree` equivalent -- for raw AST inspection, use ast-grep-mcp's `dump_syntax_tree` (or the plain `ast-grep` CLI) instead; norma stays complementary to it rather than duplicating it.
+
+### Bulk-importing an existing rule directory
+
+The above works one rule at a time. For a whole directory of existing rules
+at once -- a cloned `sgconfig.yaml` rule directory, or a local checkout of
+[ast-grep's own catalog](https://ast-grep.github.io/catalog/) -- use the
+`import_rules` MCP tool or the `norma import <dir>` CLI subcommand instead
+(TF-894). Both take a `---`-separated multi-document YAML string (or, for
+the CLI, a directory of `.yml`/`.yaml` files, scanned recursively) and
+import every `RuleConfig` document in it:
+
+```jsonc
+import_rules(
+  yaml: "id: no-await-in-promise-all\nseverity: error\nlanguage: TypeScript\n...\n---\nid: another-rule\n...",
+  category: "adopted-from-catalog"
+)
+```
+
+```bash
+norma import --category adopted-from-catalog path/to/rule-directory/
+```
+
+Unlike a single `register_pattern` call, `name`/`description` per document
+are *derived*, not supplied: `name` is the document's own raw `id`,
+`description` its `message` -- there is no per-rule name/description input
+for a bulk import. `category`, if given, applies to every document
+imported by the one call. A document that can't be registered (most
+commonly a `language:` outside the 28 `ast-grep-language` supports) is
+skipped with a reason rather than aborting the whole import -- the result
+lists both `imported` and `skipped`, so a partially-successful import is
+never silently mistaken for a fully clean one. A document with neither an
+`id:` nor a `rule:` key at all (an `sgconfig.yaml`, a stray CI workflow
+`.yml` a directory scan swept up, ...) is silently excluded from both
+lists instead -- it never looked like a rule to begin with. Re-importing
+an `id` that was already registered overwrites it, exactly like
+`register_pattern`'s own upsert -- there is no separate "never overwrite"
+mode; re-importing the same `id` twice in one call keeps only the last
+version.
+
+`norma import`'s exit status is non-zero if anything was skipped -- same
+rule as `norma validate`'s "non-zero if any file has violations" (see
+[Usage](#usage) above). Add `--json` for machine-readable output (an
+`ImportResult` object with `imported`/`skipped` arrays, the same shape
+`import_rules` returns). The CLI subcommand makes one `import_rules` call
+*per file* under the directory (not one call over every file's content
+concatenated together), so a genuine YAML syntax error in one file only
+skips that one file rather than aborting the whole directory; each skip
+reason is prefixed with its source file's path.
+
+Two things worth knowing before relying on a bulk import:
+
+- The imported `rule` text is a re-serialized, not byte-identical, copy of
+  the source document -- semantically equivalent, but formatting, key
+  order, and comments are not preserved the way a single `register_pattern`
+  call stores `rule` verbatim.
+- ast-grep's `utilDirs`/global "utility rule" mechanism (`matches:
+  <global-util>`) isn't supported yet -- a rule directory that relies on it
+  will have those rules, and the utility definitions themselves, silently
+  excluded (they have neither `id:` nor `rule:` in the shape this expects).
 
 ## 🔧 Development
 
@@ -183,6 +268,19 @@ Check formatting:
 ```bash
 cargo fmt --check
 cargo clippy
+```
+
+### Changelog
+
+[`CHANGELOG.md`](CHANGELOG.md) is generated automatically by
+[git-cliff](https://github.com/orhun/git-cliff) (config: `cliff.toml`) from
+the commit history -- **do not edit it by hand**, it gets overwritten. A
+GitHub Actions workflow (`.github/workflows/changelog.yml`) regenerates it
+on every push to `main` (i.e. whenever a PR from `develop` is merged) and
+commits it back automatically. To preview it locally:
+
+```bash
+git-cliff --config cliff.toml --output CHANGELOG.md
 ```
 
 ## 🎓 For Students
