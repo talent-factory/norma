@@ -1,0 +1,18 @@
+# CHANGELOG.md is fully machine-generated (git-cliff, see cliff.toml) and
+# gets regenerated + committed independently on both `main` and `develop`
+# (.github/workflows/changelog.yml) -- so a develop<->main merge can hit a
+# genuine textual conflict where both sides changed the same lines
+# differently, even though neither side's exact content matters: the very
+# next push to whichever branch wins re-regenerates it from scratch anyway.
+# `union` is git's own built-in low-level merge strategy (no custom
+# `.git/config` driver registration needed, unlike `merge=ours` -- that
+# distinction matters here since a driver registered only in a local
+# `.git/config` can't be honored by GitHub's own server-side PR merge,
+# which doesn't read it). Not confirmed whether GitHub's merge backend
+# actually applies attribute-based strategies like this one; it's free
+# insurance for local `git merge`/`git pull` either way, and worst case
+# a develop<->main PR still needs the same one-line fix this file's
+# history already needed once: regenerate CHANGELOG.md fresh
+# (`git-cliff --config cliff.toml --output CHANGELOG.md`) instead of
+# hand-resolving the conflict markers.
+CHANGELOG.md merge=union
