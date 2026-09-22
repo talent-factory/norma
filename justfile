@@ -91,6 +91,11 @@ list-patterns:
 validate file language="rust":
     cargo run -- validate --language {{language}} {{file}}
 
+# Example: just import path/to/rule-directory
+[group('Dev')]
+import dir category="":
+    cargo run -- import {{ if category == "" { "" } else { "--category" } }} {{category}} {{dir}}
+
 # Builds and opens norma's own rustdoc in the browser.
 [group('Dev')]
 doc:

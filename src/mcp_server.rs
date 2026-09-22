@@ -1,6 +1,6 @@
 use crate::models::{Pattern, ValidationResult};
 use crate::pattern_engine;
-use crate::pattern_store::{PatternStore, RegisterPatternError};
+use crate::pattern_store::{ImportResult, PatternStore, RegisterPatternError};
 use rmcp::{
     handler::server::wrapper::Parameters, tool, tool_handler, tool_router, transport::stdio,
     ErrorData, ServerHandler, ServiceExt,
@@ -83,6 +83,20 @@ pub struct RegisterPatternParams {
     pub rule: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ImportRulesParams {
+    /// One or more full ast-grep RuleConfig YAML documents, `---`-separated
+    /// -- e.g. a cloned `sgconfig.yaml` rule directory's files
+    /// concatenated, or a chunk of ast-grep's own rule catalog. Each
+    /// document is the same shape `register_pattern`'s `rule` expects.
+    pub yaml: String,
+    /// Applied to every pattern imported by this call; omitted (`None`) by
+    /// default -- ast-grep's own rule YAML has no per-document category.
+    #[serde(default)]
+    #[schemars(schema_with = "optional_string_schema")]
+    pub category: Option<String>,
+}
+
 /// Renders `Option<String>` as `{"anyOf": [{"type": "string"}, {"type":
 /// "null"}]}` instead of schemars' default `{"type": ["string", "null"]}`.
 /// Both are valid JSON Schema, but several MCP clients read `type` as a
@@ -132,13 +146,13 @@ fn to_json(value: &impl serde::Serialize) -> Result<String, ErrorData> {
     serde_json::to_string(value).map_err(to_tool_error)
 }
 
-/// The norma MCP tool server. Wraps a `PatternStore` and exposes six
+/// The norma MCP tool server. Wraps a `PatternStore` and exposes seven
 /// tools: validating code, applying registered patterns' fixes to code,
 /// listing the patterns for a language, dry-running a candidate rule
-/// before registering it, registering a new pattern, and listing every
-/// pattern. This is the same core the `norma validate` CLI subcommand
-/// calls (`cli.rs`), just reached over stdio instead -- see
-/// docs/adr/0001.md.
+/// before registering it, registering a new pattern, bulk-importing many
+/// rules at once (TF-894), and listing every pattern. This is the same
+/// core the `norma validate` CLI subcommand calls (`cli.rs`), just reached
+/// over stdio instead -- see docs/adr/0001.md.
 #[derive(Clone)]
 pub struct NormaServer {
     store: Arc<PatternStore>,
@@ -280,6 +294,36 @@ impl NormaServer {
                 RegisterPatternError::Storage(e) => to_tool_error(e),
             })?;
         to_json(&pattern)
+    }
+
+    /// Bulk-imports an existing rule set in one call (TF-894, see
+    /// .scratch/ast-grep-feature-parity/issues/04-bulk-import-existing-rules.md)
+    /// -- the multi-document extension of the README's "Adopting an
+    /// existing ast-grep rule" workaround, which previously required one
+    /// `register_pattern` call per rule. `name`/`description` are derived
+    /// from each document's own `id`/`message` (see
+    /// `PatternStore::import_rules`'s doc comment); `params.category`, if
+    /// given, applies to every document in this one call. A document that
+    /// fails to register (e.g. an unsupported `language:`) is skipped with
+    /// a reason rather than failing the whole import -- both `imported`
+    /// and `skipped` are reported, so a partially-successful import is
+    /// never mistaken for a fully clean one.
+    #[tool(
+        description = "Bulk-import ast-grep RuleConfig YAML documents (---separated multi-document, e.g. a cloned rule directory's files concatenated) into the pattern registry. name/description are derived from each document's own id/message; category (if given) applies to every document. A document that fails to register (e.g. an unsupported language) is skipped with a reason rather than aborting the whole import -- both imported and skipped are reported."
+    )]
+    pub async fn import_rules(
+        &self,
+        Parameters(params): Parameters<ImportRulesParams>,
+    ) -> Result<String, ErrorData> {
+        let result: ImportResult = self
+            .store
+            .import_rules(&params.yaml, params.category)
+            .await
+            .map_err(|err| match err {
+                RegisterPatternError::InvalidRule(e) => to_invalid_params(e),
+                RegisterPatternError::Storage(e) => to_tool_error(e),
+            })?;
+        to_json(&result)
     }
 
     #[tool(description = "List every registered pattern")]
@@ -594,6 +638,30 @@ rule:
         );
     }
 
+    /// `ImportRulesParams::category` reuses the exact same
+    /// `#[serde(default)]` + `optional_string_schema` combination
+    /// `RegisterPatternParams::category` does (see that field's doc
+    /// comment), for the same reason -- so it needs the same pin, or a
+    /// future schemars upgrade/cleanup could silently reintroduce the MCP
+    /// Inspector portability warning here without the sibling test above
+    /// catching it.
+    #[test]
+    fn import_rules_schema_keeps_category_optional_and_portable() {
+        let schema = serde_json::to_value(schemars::schema_for!(ImportRulesParams)).unwrap();
+
+        let category = &schema["properties"]["category"];
+        assert!(
+            category["anyOf"].is_array() && category["type"].is_null(),
+            "category must render as anyOf, not a `type` array: {category}"
+        );
+
+        let required = schema["required"].as_array().unwrap();
+        assert!(
+            !required.iter().any(|field| field == "category"),
+            "category must stay out of `required`: {required:?}"
+        );
+    }
+
     // --- apply_pattern_fix (TF-890) -----------------------------------
 
     async fn register_unwrap_fixer(server: &NormaServer) {
@@ -671,5 +739,91 @@ fix: $EXPR.expect("TODO")
             err.message.contains("unsupported language"),
             "unexpected error: {err:?}"
         );
+    }
+
+    // --- import_rules (TF-894) ------------------------------------------
+
+    #[tokio::test]
+    async fn import_rules_registers_every_document_and_reports_none_skipped() {
+        let server = test_server().await;
+        let yaml = r#"
+id: no-debug-print-rust-imported
+message: Avoid println! in production code
+severity: warning
+language: Rust
+rule:
+  pattern: println!($$$ARGS)
+---
+id: no-debug-print-go-imported
+message: Avoid fmt.Println in production code
+severity: warning
+language: Go
+rule:
+  pattern: fmt.Println($$$ARGS)
+"#
+        .to_string();
+        let params = Parameters(ImportRulesParams {
+            yaml,
+            category: Some("bulk-imported".to_string()),
+        });
+        let json = server.import_rules(params).await.unwrap();
+        let result: ImportResult = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(result.imported.len(), 2);
+        assert!(result.skipped.is_empty());
+        assert!(result
+            .imported
+            .iter()
+            .all(|p| p.category.as_deref() == Some("bulk-imported")));
+
+        // Landed in the store alongside the 20 seeded defaults.
+        let patterns_json = server.list_patterns().await.unwrap();
+        let patterns: Vec<Pattern> = serde_json::from_str(&patterns_json).unwrap();
+        assert_eq!(patterns.len(), 22);
+    }
+
+    #[tokio::test]
+    async fn import_rules_skips_an_unsupported_language_without_failing_the_whole_call() {
+        let server = test_server().await;
+        // "Cobol", not "Go" -- see validate_pattern_compliance_rejects_an_unsupported_language.
+        let yaml = r#"
+id: no-debug-print-rust-imported
+message: Avoid println! in production code
+severity: warning
+language: Rust
+rule:
+  pattern: println!($$$ARGS)
+---
+id: display-in-cobol
+message: Avoid DISPLAY in production code
+severity: warning
+language: Cobol
+rule:
+  pattern: DISPLAY $$$ARGS
+"#
+        .to_string();
+        let params = Parameters(ImportRulesParams {
+            yaml,
+            category: None,
+        });
+        let json = server.import_rules(params).await.unwrap();
+        let result: ImportResult = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(result.imported.len(), 1);
+        assert_eq!(result.imported[0].id(), "no-debug-print-rust-imported");
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.skipped[0].id.as_deref(), Some("display-in-cobol"));
+        assert!(result.skipped[0].reason.contains("Cobol"));
+    }
+
+    #[tokio::test]
+    async fn import_rules_rejects_yaml_that_does_not_even_split_into_documents() {
+        let server = test_server().await;
+        let params = Parameters(ImportRulesParams {
+            yaml: "not: valid: yaml: at: all: -".to_string(),
+            category: None,
+        });
+        let result = server.import_rules(params).await;
+        assert!(result.is_err());
     }
 }
