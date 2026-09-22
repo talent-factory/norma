@@ -121,15 +121,96 @@ command line.
 
 ## 8. CLI: an unsupported language fails loudly
 
+Since TF-893, all 28 languages `ast-grep-language` ships (including `go`,
+tested as the "unsupported" example here before) are valid -- so this now
+needs a genuinely unrecognized/misspelled one to still fail:
+
 ```bash
 cargo run -- --db /tmp/norma-manual-test.db validate \
-  --language go /tmp/norma-manual-test/clean.rs
+  --language cobol /tmp/norma-manual-test/clean.rs
 echo "exit code: $?"
 ```
 
-Expected: an error mentioning `unsupported language` and the four
-supported languages, **not** a silent "0 violations" pass. Exit code
-non-zero.
+Expected: an error mentioning `unsupported language` and norma's full
+28-language support list, **not** a silent "0 violations" pass. Exit code
+non-zero. (`go` itself now succeeds -- see step 10's `get_pattern_checklist`
+sub-step for what it reports: registrable, no default patterns yet.)
+
+## 8a. CLI: `--fix` applies fixes and reports conflicts
+
+```bash
+printf 'fn main() {\n    println!("debug");\n}\n' > /tmp/norma-manual-test/fixable.rs
+
+cargo run -- --db /tmp/norma-manual-test.db validate \
+  --language rust --fix /tmp/norma-manual-test/fixable.rs
+echo "exit code: $?"
+cat /tmp/norma-manual-test/fixable.rs
+```
+
+The shipped `no-debug-print-rust` pattern has no `fix:` of its own, so
+nothing is rewritten here and the file is unchanged -- this step only
+confirms `--fix` is a no-op (not an error) against a pattern with no fix
+to apply. To see an actual rewrite, register a pattern with a `fix:`
+first and re-run against code it matches:
+
+```bash
+cat > /tmp/norma-manual-test/register-fix.json <<'JSON'
+{"name":"No await in Promise.all","description":"test fixture","category":"code-quality","rule":"id: no-await-in-promise-all\nseverity: error\nlanguage: TypeScript\nmessage: No await in Promise.all\nrule:\n  pattern: await $A\n  inside:\n    pattern: Promise.all($_)\n    stopBy:\n      not: { any: [{ kind: array }, { kind: arguments }] }\nfix: $A\n"}
+JSON
+printf 'Promise.all([await doA(), doB()]);\n' > /tmp/norma-manual-test/fixable.ts
+```
+
+then, via the MCP Inspector (step 10) or `curl`, call `register_pattern`
+with that JSON's fields and re-run:
+
+```bash
+cargo run -- --db /tmp/norma-manual-test.db validate \
+  --language typescript --fix /tmp/norma-manual-test/fixable.ts
+cat /tmp/norma-manual-test/fixable.ts
+```
+
+Expected: `applied 1 fix(es)` on stdout, exit code depends on whether the
+rewritten file still has violations (it shouldn't, here), and the file's
+`await doA()` is rewritten to `doA()`. Re-running `validate` (no `--fix`)
+against the same file now reports **no violations** -- the fix actually
+landed. If two enabled patterns' fixes ever overlap on the same code, you
+should instead see a `[warning] fix conflict -- overlapping fixes from
+..., ... were not applied` line and neither fix applied.
+
+## 8b. CLI: `import` bulk-imports a rule directory
+
+```bash
+mkdir -p /tmp/norma-manual-test/rules
+cat > /tmp/norma-manual-test/rules/no-await.yml <<'YAML'
+id: no-await-in-promise-all
+severity: error
+language: TypeScript
+message: No await in Promise.all
+rule:
+  pattern: await $A
+  inside:
+    pattern: Promise.all($_)
+    stopBy:
+      not: { any: [{ kind: array }, { kind: arguments }] }
+fix: $A
+YAML
+cat > /tmp/norma-manual-test/rules/broken.yml <<'YAML'
+language: Cobol
+rule:
+  pattern: DISPLAY $X
+YAML
+
+cargo run -- --db /tmp/norma-manual-test.db import \
+  --category adopted-from-catalog /tmp/norma-manual-test/rules
+echo "exit code: $?"
+```
+
+Expected: `imported no-await-in-promise-all [typescript]`, a `[warning]
+skipped ...: unsupported language ...` line for `broken.yml`, a summary
+(`1 imported, 1 skipped`), and a **non-zero exit code** (any skip fails
+the run, same convention as `validate`'s "any violation fails the run").
+Confirm it actually landed: `cargo run -- --db /tmp/norma-manual-test.db
+list-patterns | grep no-await-in-promise-all`.
 
 ## 9. CLI: `--db` / `$NORMA_DB` override
 
@@ -179,6 +260,26 @@ This opens a local web UI. From there:
    `{"name": "Broken", "description": "d", "rule": "not: valid: yaml"}`)
    -- expect an error response, not a silently accepted pattern (check
    with `list_patterns` afterwards that nothing new was added).
+6. Call **`apply_pattern_fix`** with
+   `{"code": "fn main() { println!(\"debug\"); }", "language": "rust"}`
+   -- expect the rewritten source back (unchanged here, since the shipped
+   `no-debug-print-rust` pattern has no `fix:`) and confirm the tool never
+   touches disk (nothing under `/tmp/norma-manual-test.db`'s directory
+   changes).
+7. Call **`test_pattern`** with
+   `{"rule": "id: no-debug-print-java\nmessage: test\nseverity: warning\nlanguage: Java\nrule:\n  pattern: System.out.println($$$ARGS)\n", "code": "System.out.println(\"hi\");"}`
+   -- expect one match back (`passed: false`, meaning "the rule matched",
+   not "something went wrong" -- see the tool's own description). Then
+   call **`list_patterns`** and confirm nothing new was registered --
+   `test_pattern` never touches the store.
+8. Call **`import_rules`** with
+   `{"yaml": "id: no-debug-print-elixir\nseverity: warning\nlanguage: Elixir\nmessage: test\nrule:\n  pattern: IO.puts($$$ARGS)\n"}`
+   -- expect `{"imported": [...one pattern...], "skipped": []}`. Then call
+   it again with the same `yaml` plus a second, malformed document
+   appended (`"...\n---\nlanguage: Cobol\nrule:\n  pattern: DISPLAY $X\n"`)
+   -- expect the first document to report as imported again (upsert, not
+   duplicated) and the second as `skipped` with an `unsupported language`
+   reason.
 
 ## 11. MCP server: smoke test without Node.js (raw stdio)
 
