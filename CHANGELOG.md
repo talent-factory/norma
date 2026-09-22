@@ -37,6 +37,8 @@ overwritten on the next merge.
 
 ### 📚 Documentation
 
+- Regenerate CHANGELOG.md via git-cliff ([63aa6c7](https://github.com/talent-factory/norma/commit/63aa6c7886a64c1dd7f4504057b8f57e0d6b0e5a))
+
 - 📚 docs: CLAUDE.md für Claude Code Sessions anlegen ([febdc0d](https://github.com/talent-factory/norma/commit/febdc0d975d4ab5b09fb4c577e671c6f8a11af80))
 
 - Bring DEVELOPMENT.md and MANUAL_TESTING.md in line with TF-890..894 ([c7b5435](https://github.com/talent-factory/norma/commit/c7b5435a72b84f217b995c8c17bf88dad1b9c405))
@@ -62,6 +64,8 @@ overwritten on the next merge.
 
 
 ### 🔧 Chores
+
+- Add workflow_dispatch to the changelog workflow ([cfd9b2f](https://github.com/talent-factory/norma/commit/cfd9b2f866913736b64273cc8bd92aa0e553fb2f))
 
 - Automate CHANGELOG.md generation via git-cliff on merge to main ([05dc9de](https://github.com/talent-factory/norma/commit/05dc9de5037c9e83f8a8e2ed1069c4a2aa09e1e8))
 
