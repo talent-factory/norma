@@ -270,6 +270,19 @@ cargo fmt --check
 cargo clippy
 ```
 
+### Changelog
+
+[`CHANGELOG.md`](CHANGELOG.md) is generated automatically by
+[git-cliff](https://github.com/orhun/git-cliff) (config: `cliff.toml`) from
+the commit history -- **do not edit it by hand**, it gets overwritten. A
+GitHub Actions workflow (`.github/workflows/changelog.yml`) regenerates it
+on every push to `main` (i.e. whenever a PR from `develop` is merged) and
+commits it back automatically. To preview it locally:
+
+```bash
+git-cliff --config cliff.toml --output CHANGELOG.md
+```
+
 ## 🎓 For Students
 
 norma is designed to help you:
