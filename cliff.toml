@@ -9,11 +9,15 @@
 # those explicitly and funnels everything else into a catch-all group
 # rather than silently dropping commits that don't match `feat:`/`fix:`.
 #
-# No git tags exist yet (see docs/adr -- no release/versioning process is
-# established), so every commit renders under a single "Unreleased"
-# section for now. The moment this project starts tagging releases
-# (`git tag vX.Y.Z`), git-cliff automatically starts splitting the
-# changelog into dated version sections -- no config change needed.
+# No semver/Cargo.toml-version release process exists, so this doesn't
+# tag `vX.Y.Z`-style versions. Instead, `.github/workflows/changelog.yml`
+# tags every push to `main` with a date-based release tag (`v2026.09.22`,
+# or `v2026.09.22.2` for a second release the same day) *before* running
+# git-cliff -- so everything already merged into `main` renders under a
+# real dated section instead of "Unreleased" (which would otherwise be
+# misleading: code on `main` has shipped, it isn't pending). Only
+# `develop` (pre-release integration work) still accumulates under
+# "Unreleased" until it's actually merged into `main`.
 
 [changelog]
 header = """

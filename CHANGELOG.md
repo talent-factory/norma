@@ -9,6 +9,8 @@ overwritten on the next merge.
 
 ### 🚀 Features
 
+- Tag releases and publish cross-platform binaries on merge to main ([4e634eb](https://github.com/talent-factory/norma/commit/4e634ebd7911fa9ed34d730d53028429e8db84c3))
+
 - Bulk-import existing ast-grep rule sets ([TF-894](https://linear.app/talent-factory/issue/TF-894)) ([a7dd66d](https://github.com/talent-factory/norma/commit/a7dd66d2a0e2ec82f157f888846d13a3ef7f2de6))
 
 - Generically unlock all 28 SupportLang languages ([TF-893](https://linear.app/talent-factory/issue/TF-893)) ([0a49601](https://github.com/talent-factory/norma/commit/0a49601ef0bf380875d00aa908c9db0fed702b16))
@@ -19,6 +21,8 @@ overwritten on the next merge.
 
 
 ### 🐛 Bug Fixes
+
+- CHANGELOG.md on develop drifts stale, workflow only ran on main ([b041afb](https://github.com/talent-factory/norma/commit/b041afb8af8dd9e4d0f7d1622bb6e20daecae7d0))
 
 - Gh pr create has no --json/--jq output mode ([9db5ffa](https://github.com/talent-factory/norma/commit/9db5ffabf60dd117c734388325f2127b37f3d7d0))
 
@@ -37,7 +41,11 @@ overwritten on the next merge.
 
 ### 📚 Documentation
 
+- Regenerate CHANGELOG.md via git-cliff ([1ea768c](https://github.com/talent-factory/norma/commit/1ea768c5dce6d398ae4f32e73ee0339752501d3a))
+
 - Regenerate CHANGELOG.md via git-cliff ([63aa6c7](https://github.com/talent-factory/norma/commit/63aa6c7886a64c1dd7f4504057b8f57e0d6b0e5a))
+
+- Regenerate CHANGELOG.md via git-cliff ([4ed6f0e](https://github.com/talent-factory/norma/commit/4ed6f0e62dde38f08a3a647116f2d09c367d31d9))
 
 - 📚 docs: CLAUDE.md für Claude Code Sessions anlegen ([febdc0d](https://github.com/talent-factory/norma/commit/febdc0d975d4ab5b09fb4c577e671c6f8a11af80))
 
@@ -65,12 +73,16 @@ overwritten on the next merge.
 
 ### 🔧 Chores
 
+- Mark CHANGELOG.md merge=union to avoid blocking merges on it ([c4238a7](https://github.com/talent-factory/norma/commit/c4238a77d05072acb6b4f8a216bc2ec8c1df81fa))
+
 - Add workflow_dispatch to the changelog workflow ([cfd9b2f](https://github.com/talent-factory/norma/commit/cfd9b2f866913736b64273cc8bd92aa0e553fb2f))
 
 - Automate CHANGELOG.md generation via git-cliff on merge to main ([05dc9de](https://github.com/talent-factory/norma/commit/05dc9de5037c9e83f8a8e2ed1069c4a2aa09e1e8))
 
 
 ### 🔩 Other Changes
+
+- Merge remote-tracking branch 'origin/main' into develop ([d8973d1](https://github.com/talent-factory/norma/commit/d8973d16304a84ed5ae75fd908061c73e192ba23))
 
 - Pin register_pattern's category schema with a regression test ([8a6f863](https://github.com/talent-factory/norma/commit/8a6f863942a5a7d9ea1213927c56aae39ed57929))
 
