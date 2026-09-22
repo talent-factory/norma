@@ -15,11 +15,17 @@ name: Changelog
 # them, but every real feature/fix/docs entry matches once `develop` has
 # been merged into `main`.
 #
+# On `main` specifically, this also tags the release before running
+# git-cliff (see the "Tag today's release" step) -- without a tag, every
+# commit ever renders under a single "Unreleased" heading forever, which
+# is actively misleading once code has actually shipped to `main`.
+#
 # `paths-ignore` on the trigger, not just a run-time guard, is what stops
 # this workflow's own PR (touching only CHANGELOG.md) from triggering
 # itself again -- GitHub skips *starting* the workflow for a push that only
 # touches ignored paths, so there's no infinite loop to guard against
-# inside the job at all.
+# inside the job at all. Pushing a tag doesn't re-trigger it either --
+# `on.push.branches` only matches branch pushes, never tag pushes.
 on:
   push:
     branches: [main, develop]
@@ -32,6 +38,10 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # Needed for `gh workflow run` in "Tag today's release", which explicitly
+  # dispatches release.yml -- a GITHUB_TOKEN-authenticated tag push doesn't
+  # trigger other workflows on its own (see release.yml's header comment).
+  actions: write
 
 jobs:
   changelog:
@@ -43,6 +53,50 @@ jobs:
           # git-cliff needs the full history, not just the latest commit,
           # to build the changelog from every commit ever made.
           fetch-depth: 0
+          # Explicit rather than relying on actions/checkout's own default:
+          # the "Tag today's release" step below needs to see every
+          # existing tag to pick a name that doesn't collide.
+          fetch-tags: true
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Tag today's release
+        if: github.ref_name == 'main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # `main` is the "shipped" branch here (see docs/adr and
+          # DEVELOPMENT.md) -- every merge into it is a release in that
+          # sense, even without a formal semver/Cargo.toml-version bump
+          # policy. A lightweight date-based tag (not touching Cargo.toml,
+          # which stays a separate decision) is enough for git-cliff to
+          # stop rendering everything as "Unreleased": it groups commits
+          # by the nearest reachable tag, so this alone gives every commit
+          # already on `main` a real dated section. `develop` is
+          # deliberately never tagged here -- it's pre-release integration
+          # work, "Unreleased" is the accurate label for it.
+          today=$(date -u +%Y.%m.%d)
+          tag="v${today}"
+          suffix=1
+          while git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; do
+            suffix=$((suffix + 1))
+            tag="v${today}.${suffix}"
+          done
+          git tag -a "$tag" -m "Release ${tag}"
+          git push origin "refs/tags/${tag}"
+
+          # Explicitly dispatch release.yml (builds the Linux/Windows/
+          # macOS binaries and publishes the GitHub release) rather than
+          # relying on release.yml's own `push: tags: v*` trigger -- that
+          # trigger exists for a human pushing a tag by hand, but a tag
+          # pushed with this workflow's own GITHUB_TOKEN (just above)
+          # does not fire other workflows' triggers at all, by GitHub's
+          # deliberate design (anti-recursion safeguard). workflow_dispatch
+          # is the documented exception.
+          gh workflow run release.yml --ref main -f "tag=${tag}"
 
       - name: Generate changelog
         uses: orhun/git-cliff-action@v4
@@ -60,8 +114,6 @@ jobs:
             echo "CHANGELOG.md unchanged, nothing to commit."
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add CHANGELOG.md
           git commit -m "docs: regenerate CHANGELOG.md via git-cliff"
 
