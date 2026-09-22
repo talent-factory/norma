@@ -9,6 +9,8 @@ overwritten on the next merge.
 
 ### 🚀 Features
 
+- Tag releases and publish cross-platform binaries on merge to main ([4e634eb](https://github.com/talent-factory/norma/commit/4e634ebd7911fa9ed34d730d53028429e8db84c3))
+
 - Bulk-import existing ast-grep rule sets ([TF-894](https://linear.app/talent-factory/issue/TF-894)) ([a7dd66d](https://github.com/talent-factory/norma/commit/a7dd66d2a0e2ec82f157f888846d13a3ef7f2de6))
 
 - Generically unlock all 28 SupportLang languages ([TF-893](https://linear.app/talent-factory/issue/TF-893)) ([0a49601](https://github.com/talent-factory/norma/commit/0a49601ef0bf380875d00aa908c9db0fed702b16))
@@ -19,6 +21,12 @@ overwritten on the next merge.
 
 
 ### 🐛 Bug Fixes
+
+- CHANGELOG.md on develop drifts stale, workflow only ran on main ([b041afb](https://github.com/talent-factory/norma/commit/b041afb8af8dd9e4d0f7d1622bb6e20daecae7d0))
+
+- Gh pr create has no --json/--jq output mode ([9db5ffa](https://github.com/talent-factory/norma/commit/9db5ffabf60dd117c734388325f2127b37f3d7d0))
+
+- Changelog workflow can't push directly to a protected branch ([fe44158](https://github.com/talent-factory/norma/commit/fe4415842b49f2f4dbbd0cf114be6d51e6a7a983))
 
 - Address PR #8 multi-agent review findings ([TF-894](https://linear.app/talent-factory/issue/TF-894)) ([1d4ebf6](https://github.com/talent-factory/norma/commit/1d4ebf65621ed10c7b11019f5cd7d868465c33d9))
 
@@ -55,6 +63,13 @@ overwritten on the next merge.
 - Resolve rule-testing/AST-debug-tooling ticket ([0460337](https://github.com/talent-factory/norma/commit/046033722f160e9fdef1e02ca8e2ecae667d3e41))
 
 - Chart ast-grep feature-parity map, resolve autofix ticket ([580b2b0](https://github.com/talent-factory/norma/commit/580b2b0b52015c1d6c299997f823cd8aaec152ec))
+
+
+### 🔧 Chores
+
+- Add workflow_dispatch to the changelog workflow ([cfd9b2f](https://github.com/talent-factory/norma/commit/cfd9b2f866913736b64273cc8bd92aa0e553fb2f))
+
+- Automate CHANGELOG.md generation via git-cliff on merge to main ([05dc9de](https://github.com/talent-factory/norma/commit/05dc9de5037c9e83f8a8e2ed1069c4a2aa09e1e8))
 
 
 ### 🔩 Other Changes
