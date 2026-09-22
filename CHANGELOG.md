@@ -41,6 +41,10 @@ overwritten on the next merge.
 
 ### 📚 Documentation
 
+- Regenerate CHANGELOG.md via git-cliff ([54daba9](https://github.com/talent-factory/norma/commit/54daba9603de16ace3aff0786652d96c29910143))
+
+- Document the CHANGELOG.md merge=union rationale in DEVELOPMENT.md ([380055b](https://github.com/talent-factory/norma/commit/380055bf571720ea981db0def6fa3e3b54a251c5))
+
 - Regenerate CHANGELOG.md via git-cliff ([1ea768c](https://github.com/talent-factory/norma/commit/1ea768c5dce6d398ae4f32e73ee0339752501d3a))
 
 - Regenerate CHANGELOG.md via git-cliff ([63aa6c7](https://github.com/talent-factory/norma/commit/63aa6c7886a64c1dd7f4504057b8f57e0d6b0e5a))
@@ -81,6 +85,8 @@ overwritten on the next merge.
 
 
 ### 🔩 Other Changes
+
+- Merge remote-tracking branch 'origin/develop' into develop ([a4bd9d1](https://github.com/talent-factory/norma/commit/a4bd9d1b821a5223ea2b5f8f13a0ce34a75b9332))
 
 - Merge remote-tracking branch 'origin/main' into develop ([d8973d1](https://github.com/talent-factory/norma/commit/d8973d16304a84ed5ae75fd908061c73e192ba23))
 
