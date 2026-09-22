@@ -276,8 +276,9 @@ cargo clippy
 [git-cliff](https://github.com/orhun/git-cliff) (config: `cliff.toml`) from
 the commit history -- **do not edit it by hand**, it gets overwritten. A
 GitHub Actions workflow (`.github/workflows/changelog.yml`) regenerates it
-on every push to `main` (i.e. whenever a PR from `develop` is merged) and
-commits it back automatically. To preview it locally:
+on every push to `main` or `develop` (i.e. whenever a PR merges into
+either) and commits it back automatically -- both branches, so `develop`'s
+copy doesn't go stale between releases. To preview it locally:
 
 ```bash
 git-cliff --config cliff.toml --output CHANGELOG.md

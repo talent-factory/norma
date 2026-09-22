@@ -1,9 +1,19 @@
 name: Changelog
 
-# Regenerates CHANGELOG.md from the full commit history whenever `main`
-# moves -- in practice, whenever a PR from `develop` is merged (GitHub's
-# merge button pushes a merge commit to `main`, which is exactly a `push`
-# event on this branch; there's no separate "PR merged" trigger needed).
+# Regenerates CHANGELOG.md from the full commit history whenever `main` or
+# `develop` moves -- in practice, whenever a PR merges into either (GitHub's
+# merge button pushes a merge commit, which is exactly a `push` event on
+# that branch; there's no separate "PR merged" trigger needed).
+#
+# Both branches, not just `main`: this workflow originally only ran on
+# `main`, which left `develop`'s CHANGELOG.md permanently stale/drifted
+# from the moment this automation shipped (it only ever regenerated on the
+# branch that got pushed to). Running on both keeps them both current --
+# `main`'s copy will still be a few (self-referential, `docs: regenerate
+# CHANGELOG.md via git-cliff`) commits ahead of `develop`'s at any given
+# moment, since those commits only ever land on the branch that produced
+# them, but every real feature/fix/docs entry matches once `develop` has
+# been merged into `main`.
 #
 # `paths-ignore` on the trigger, not just a run-time guard, is what stops
 # this workflow's own PR (touching only CHANGELOG.md) from triggering
@@ -12,11 +22,11 @@ name: Changelog
 # inside the job at all.
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths-ignore:
       - CHANGELOG.md
   # Lets a maintainer force a regeneration on demand (e.g. after editing
-  # cliff.toml) without needing an actual push to `main`.
+  # cliff.toml) without needing an actual push to `main`/`develop`.
   workflow_dispatch:
 
 permissions:
@@ -55,16 +65,17 @@ jobs:
           git add CHANGELOG.md
           git commit -m "docs: regenerate CHANGELOG.md via git-cliff"
 
-          # `main`/`develop` are both protected (PR-only, though 0
-          # approvals/status checks are required) -- the workflow's own
-          # GITHUB_TOKEN isn't on the push-restriction allowlist, so a
-          # direct `git push` here is rejected ("GH006: Protected branch
-          # update failed"). Opening a single-file PR from a dedicated
-          # branch and merging it immediately works within that
-          # restriction instead. Fixed branch name + `--force`
-          # (create-or-reset) so a leftover branch from an earlier failed
-          # run doesn't pile up or go stale.
-          branch="changelog/auto-update"
+          # main/develop both require changes to go through a pull request
+          # (0 approvals/status checks, but a PR nonetheless) -- a direct
+          # `git push` here is rejected ("GH006: Protected branch update
+          # failed ... Changes must be made through a pull request").
+          # Opening a single-file PR from a dedicated branch and merging it
+          # immediately works within that requirement instead. The branch
+          # name includes the target ref so a run triggered by `main` and
+          # one triggered by `develop` can never collide; `--force`
+          # (create-or-reset) means a leftover branch from an earlier
+          # failed run doesn't pile up or go stale.
+          branch="changelog/auto-update-${GITHUB_REF_NAME}"
           git push --force origin "HEAD:refs/heads/$branch"
 
           pr_number=$(gh pr list --head "$branch" --base "${GITHUB_REF_NAME}" --state open --json number --jq '.[0].number')
