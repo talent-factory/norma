@@ -41,6 +41,8 @@ overwritten on the next merge.
 
 ### 📚 Documentation
 
+- Regenerate CHANGELOG.md via git-cliff ([4ed6f0e](https://github.com/talent-factory/norma/commit/4ed6f0e62dde38f08a3a647116f2d09c367d31d9))
+
 - 📚 docs: CLAUDE.md für Claude Code Sessions anlegen ([febdc0d](https://github.com/talent-factory/norma/commit/febdc0d975d4ab5b09fb4c577e671c6f8a11af80))
 
 - Bring DEVELOPMENT.md and MANUAL_TESTING.md in line with TF-890..894 ([c7b5435](https://github.com/talent-factory/norma/commit/c7b5435a72b84f217b995c8c17bf88dad1b9c405))
