@@ -37,12 +37,18 @@ In short: `ast-grep-mcp` is `ast-grep --pattern`, reachable over MCP for interac
 
 ## Usage
 
-Build and install once:
+### Install
+
+Download a prebuilt binary from the [latest release](https://github.com/talent-factory/norma/releases/latest) (Linux x86_64, Windows x86_64, or a macOS universal binary covering both Intel and Apple Silicon), unpack it, and put `norma` on your `PATH`.
+
+Or build from source:
 
 ```bash
 cargo build --release
 cargo install --path .
 ```
+
+Releases are cut automatically: every merge into `main` gets tagged (`vYYYY.MM.DD`, see [Changelog](#changelog) below) and `.github/workflows/release.yml` builds and publishes the three binaries for that tag.
 
 Run the MCP tool server (for Claude Code / MCP Inspector):
 
@@ -276,8 +282,16 @@ cargo clippy
 [git-cliff](https://github.com/orhun/git-cliff) (config: `cliff.toml`) from
 the commit history -- **do not edit it by hand**, it gets overwritten. A
 GitHub Actions workflow (`.github/workflows/changelog.yml`) regenerates it
-on every push to `main` (i.e. whenever a PR from `develop` is merged) and
-commits it back automatically. To preview it locally:
+on every push to `main` or `develop` (i.e. whenever a PR merges into
+either) and commits it back automatically -- both branches, so `develop`'s
+copy doesn't go stale between releases. On `main` specifically, it also
+tags the release first (`vYYYY.MM.DD`, or `vYYYY.MM.DD.2` for a second
+release the same day) so shipped code renders under a real dated section
+instead of "Unreleased", and dispatches `.github/workflows/release.yml`
+to build and publish that tag's binaries (see [Install](#install) above).
+`develop` is never tagged -- it's pre-release integration work, so
+"Unreleased" is the accurate label for it. To preview the changelog
+locally:
 
 ```bash
 git-cliff --config cliff.toml --output CHANGELOG.md

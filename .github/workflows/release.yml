@@ -1,0 +1,176 @@
+name: Release
+
+# Builds norma release binaries for Linux, Windows, and macOS (a single
+# universal binary covering both Intel and Apple Silicon), and publishes
+# them to a GitHub Release for the tag.
+#
+# Two ways to trigger this:
+# - `push: tags: v*` -- for a tag pushed with a real user's own
+#   credentials (e.g. `git tag vX.Y.Z && git push --tags` by hand).
+# - `workflow_dispatch` -- for a tag pushed by another workflow's
+#   `GITHUB_TOKEN` (see .github/workflows/changelog.yml's "Tag today's
+#   release" step). GitHub deliberately does not let a GITHUB_TOKEN-
+#   authenticated push trigger further workflow runs (to prevent
+#   accidental infinite loops between workflows) -- `workflow_dispatch`
+#   and `repository_dispatch` are the two documented exceptions, so
+#   changelog.yml explicitly dispatches this workflow with `gh workflow
+#   run` right after pushing the tag, rather than relying on the tag
+#   push itself to fire it.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and release (defaults to the ref that triggered this run)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          dir="norma-${{ matrix.name }}"
+          mkdir "$dir"
+          cp "target/${{ matrix.target }}/release/norma" "$dir/"
+          cp README.md LICENSE-MIT LICENSE-APACHE "$dir/"
+          tar czf "$dir.tar.gz" "$dir"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          dir="norma-${{ matrix.name }}"
+          mkdir "$dir"
+          cp "target/${{ matrix.target }}/release/norma.exe" "$dir/"
+          cp README.md LICENSE-MIT LICENSE-APACHE "$dir/"
+          7z a "$dir.zip" "$dir" > /dev/null
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: norma-${{ matrix.name }}
+          path: norma-${{ matrix.name }}.*
+          if-no-files-found: error
+
+  build-macos-universal:
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Build both architectures
+        run: |
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+
+      - name: Combine into one universal binary
+        run: |
+          lipo -create -output norma \
+            target/x86_64-apple-darwin/release/norma \
+            target/aarch64-apple-darwin/release/norma
+
+      - name: Package
+        run: |
+          dir="norma-macos-universal"
+          mkdir "$dir"
+          mv norma "$dir/"
+          cp README.md LICENSE-MIT LICENSE-APACHE "$dir/"
+          tar czf "$dir.tar.gz" "$dir"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: norma-macos-universal
+          path: norma-macos-universal.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: [build, build-macos-universal]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          # git-cliff (for this release's own notes, below) needs the full
+          # history and every tag, not just the latest commit.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve the tag to release
+        id: tag
+        env:
+          # Routed through env rather than interpolated straight into the
+          # script, even though workflow_dispatch inputs here can only come
+          # from someone with write access to trigger the run -- cheap
+          # defense in depth against shell-metacharacter surprises.
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          tag="$TAG_INPUT"
+          if [ -z "$tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download all built binaries
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate this release's notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          # --latest: only this tag's section, not the whole changelog.
+          # --strip all: drop the header/footer, leaving just the body --
+          # a GitHub Release page already has its own title (the tag) and
+          # its own generated-by-whom framing.
+          args: --latest --strip all --tag ${{ steps.tag.outputs.tag }}
+        env:
+          OUTPUT: RELEASE_NOTES.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # `merge-multiple: true` above lands every artifact's file(s)
+          # directly under dist/ (no per-artifact subdirectory), hence the
+          # flat glob.
+          gh release create "$RELEASE_TAG" dist/* \
+            --title "$RELEASE_TAG" \
+            --notes-file RELEASE_NOTES.md

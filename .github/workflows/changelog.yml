@@ -1,27 +1,47 @@
 name: Changelog
 
-# Regenerates CHANGELOG.md from the full commit history whenever `main`
-# moves -- in practice, whenever a PR from `develop` is merged (GitHub's
-# merge button pushes a merge commit to `main`, which is exactly a `push`
-# event on this branch; there's no separate "PR merged" trigger needed).
+# Regenerates CHANGELOG.md from the full commit history whenever `main` or
+# `develop` moves -- in practice, whenever a PR merges into either (GitHub's
+# merge button pushes a merge commit, which is exactly a `push` event on
+# that branch; there's no separate "PR merged" trigger needed).
+#
+# Both branches, not just `main`: this workflow originally only ran on
+# `main`, which left `develop`'s CHANGELOG.md permanently stale/drifted
+# from the moment this automation shipped (it only ever regenerated on the
+# branch that got pushed to). Running on both keeps them both current --
+# `main`'s copy will still be a few (self-referential, `docs: regenerate
+# CHANGELOG.md via git-cliff`) commits ahead of `develop`'s at any given
+# moment, since those commits only ever land on the branch that produced
+# them, but every real feature/fix/docs entry matches once `develop` has
+# been merged into `main`.
+#
+# On `main` specifically, this also tags the release before running
+# git-cliff (see the "Tag today's release" step) -- without a tag, every
+# commit ever renders under a single "Unreleased" heading forever, which
+# is actively misleading once code has actually shipped to `main`.
 #
 # `paths-ignore` on the trigger, not just a run-time guard, is what stops
 # this workflow's own PR (touching only CHANGELOG.md) from triggering
 # itself again -- GitHub skips *starting* the workflow for a push that only
 # touches ignored paths, so there's no infinite loop to guard against
-# inside the job at all.
+# inside the job at all. Pushing a tag doesn't re-trigger it either --
+# `on.push.branches` only matches branch pushes, never tag pushes.
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths-ignore:
       - CHANGELOG.md
   # Lets a maintainer force a regeneration on demand (e.g. after editing
-  # cliff.toml) without needing an actual push to `main`.
+  # cliff.toml) without needing an actual push to `main`/`develop`.
   workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
+  # Needed for `gh workflow run` in "Tag today's release", which explicitly
+  # dispatches release.yml -- a GITHUB_TOKEN-authenticated tag push doesn't
+  # trigger other workflows on its own (see release.yml's header comment).
+  actions: write
 
 jobs:
   changelog:
@@ -33,6 +53,50 @@ jobs:
           # git-cliff needs the full history, not just the latest commit,
           # to build the changelog from every commit ever made.
           fetch-depth: 0
+          # Explicit rather than relying on actions/checkout's own default:
+          # the "Tag today's release" step below needs to see every
+          # existing tag to pick a name that doesn't collide.
+          fetch-tags: true
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Tag today's release
+        if: github.ref_name == 'main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # `main` is the "shipped" branch here (see docs/adr and
+          # DEVELOPMENT.md) -- every merge into it is a release in that
+          # sense, even without a formal semver/Cargo.toml-version bump
+          # policy. A lightweight date-based tag (not touching Cargo.toml,
+          # which stays a separate decision) is enough for git-cliff to
+          # stop rendering everything as "Unreleased": it groups commits
+          # by the nearest reachable tag, so this alone gives every commit
+          # already on `main` a real dated section. `develop` is
+          # deliberately never tagged here -- it's pre-release integration
+          # work, "Unreleased" is the accurate label for it.
+          today=$(date -u +%Y.%m.%d)
+          tag="v${today}"
+          suffix=1
+          while git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; do
+            suffix=$((suffix + 1))
+            tag="v${today}.${suffix}"
+          done
+          git tag -a "$tag" -m "Release ${tag}"
+          git push origin "refs/tags/${tag}"
+
+          # Explicitly dispatch release.yml (builds the Linux/Windows/
+          # macOS binaries and publishes the GitHub release) rather than
+          # relying on release.yml's own `push: tags: v*` trigger -- that
+          # trigger exists for a human pushing a tag by hand, but a tag
+          # pushed with this workflow's own GITHUB_TOKEN (just above)
+          # does not fire other workflows' triggers at all, by GitHub's
+          # deliberate design (anti-recursion safeguard). workflow_dispatch
+          # is the documented exception.
+          gh workflow run release.yml --ref main -f "tag=${tag}"
 
       - name: Generate changelog
         uses: orhun/git-cliff-action@v4
@@ -50,21 +114,20 @@ jobs:
             echo "CHANGELOG.md unchanged, nothing to commit."
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add CHANGELOG.md
           git commit -m "docs: regenerate CHANGELOG.md via git-cliff"
 
-          # `main`/`develop` are both protected (PR-only, though 0
-          # approvals/status checks are required) -- the workflow's own
-          # GITHUB_TOKEN isn't on the push-restriction allowlist, so a
-          # direct `git push` here is rejected ("GH006: Protected branch
-          # update failed"). Opening a single-file PR from a dedicated
-          # branch and merging it immediately works within that
-          # restriction instead. Fixed branch name + `--force`
-          # (create-or-reset) so a leftover branch from an earlier failed
-          # run doesn't pile up or go stale.
-          branch="changelog/auto-update"
+          # main/develop both require changes to go through a pull request
+          # (0 approvals/status checks, but a PR nonetheless) -- a direct
+          # `git push` here is rejected ("GH006: Protected branch update
+          # failed ... Changes must be made through a pull request").
+          # Opening a single-file PR from a dedicated branch and merging it
+          # immediately works within that requirement instead. The branch
+          # name includes the target ref so a run triggered by `main` and
+          # one triggered by `develop` can never collide; `--force`
+          # (create-or-reset) means a leftover branch from an earlier
+          # failed run doesn't pile up or go stale.
+          branch="changelog/auto-update-${GITHUB_REF_NAME}"
           git push --force origin "HEAD:refs/heads/$branch"
 
           pr_number=$(gh pr list --head "$branch" --base "${GITHUB_REF_NAME}" --state open --json number --jq '.[0].number')
