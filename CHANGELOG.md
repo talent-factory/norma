@@ -41,6 +41,10 @@ overwritten on the next merge.
 
 ### 📚 Documentation
 
+- Regenerate CHANGELOG.md via git-cliff ([1ea768c](https://github.com/talent-factory/norma/commit/1ea768c5dce6d398ae4f32e73ee0339752501d3a))
+
+- Regenerate CHANGELOG.md via git-cliff ([63aa6c7](https://github.com/talent-factory/norma/commit/63aa6c7886a64c1dd7f4504057b8f57e0d6b0e5a))
+
 - Regenerate CHANGELOG.md via git-cliff ([4ed6f0e](https://github.com/talent-factory/norma/commit/4ed6f0e62dde38f08a3a647116f2d09c367d31d9))
 
 - 📚 docs: CLAUDE.md für Claude Code Sessions anlegen ([febdc0d](https://github.com/talent-factory/norma/commit/febdc0d975d4ab5b09fb4c577e671c6f8a11af80))
@@ -69,12 +73,16 @@ overwritten on the next merge.
 
 ### 🔧 Chores
 
+- Mark CHANGELOG.md merge=union to avoid blocking merges on it ([c4238a7](https://github.com/talent-factory/norma/commit/c4238a77d05072acb6b4f8a216bc2ec8c1df81fa))
+
 - Add workflow_dispatch to the changelog workflow ([cfd9b2f](https://github.com/talent-factory/norma/commit/cfd9b2f866913736b64273cc8bd92aa0e553fb2f))
 
 - Automate CHANGELOG.md generation via git-cliff on merge to main ([05dc9de](https://github.com/talent-factory/norma/commit/05dc9de5037c9e83f8a8e2ed1069c4a2aa09e1e8))
 
 
 ### 🔩 Other Changes
+
+- Merge remote-tracking branch 'origin/main' into develop ([d8973d1](https://github.com/talent-factory/norma/commit/d8973d16304a84ed5ae75fd908061c73e192ba23))
 
 - Pin register_pattern's category schema with a regression test ([8a6f863](https://github.com/talent-factory/norma/commit/8a6f863942a5a7d9ea1213927c56aae39ed57929))
 
