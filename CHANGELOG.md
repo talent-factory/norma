@@ -5,9 +5,11 @@ All notable changes to this project. Generated automatically by
 every merge to `main` -- **do not edit by hand**, changes will be
 overwritten on the next merge.
 
-## [Unreleased]
+## [2026.09.23] - 2026-09-23
 
 ### 📚 Documentation
+
+- Regenerate CHANGELOG.md via git-cliff after main merge ([580ff9e](https://github.com/talent-factory/norma/commit/580ff9e4010f143e26bc584f88a28fa5db1d2aeb))
 
 - Regenerate CHANGELOG.md via git-cliff ([62a4dae](https://github.com/talent-factory/norma/commit/62a4daec823cb282d212aed05183b13a8d01cf27))
 
