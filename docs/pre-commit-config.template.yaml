@@ -1,0 +1,54 @@
+# Reusable norma pre-commit hook template
+#
+# Copy the relevant hook block(s) into your own project's
+# `.pre-commit-config.yaml`, then run `pre-commit install` in that repo
+# (the hook installation itself is always per-repo -- pre-commit writes
+# to that repo's `.git/hooks/`, which is never shared or versioned).
+#
+# The pattern registry norma validates against IS shared, though: by
+# default every `norma` invocation on this machine reads/writes the same
+# SQLite DB (`$XDG_DATA_HOME/norma/norma.db`, see README.md "Where the
+# pattern database lives"), so patterns registered once are available to
+# every project's hook without re-registering them. Point `--db` at a
+# checked-in path instead if a project needs its own pattern set.
+#
+# Prereq in each target repo: `norma` on PATH (`cargo install --path .`
+# from the norma repo, or wherever it's published).
+repos:
+  - repo: local
+    hooks:
+      # One hook per language actually used in the target repo -- norma
+      # validates a single `--language` per invocation, so a polyglot
+      # project needs one block per language below, each scoped to its
+      # own file extension via `files`. Delete the languages you don't
+      # need; `norma list-patterns` shows what's registered per language.
+      - id: norma-validate-rust
+        name: norma pattern validation (Rust)
+        entry: norma validate --language rust --json
+        language: system
+        files: \.rs$
+        require_serial: true # concurrent invocations would open the same SQLite DB at once
+
+      - id: norma-validate-python
+        name: norma pattern validation (Python)
+        entry: norma validate --language python --json
+        language: system
+        files: \.py$
+        require_serial: true
+
+      - id: norma-validate-typescript
+        name: norma pattern validation (TypeScript)
+        entry: norma validate --language typescript --json
+        language: system
+        files: \.tsx?$
+        require_serial: true
+
+      - id: norma-validate-java
+        name: norma pattern validation (Java)
+        entry: norma validate --language java --json
+        language: system
+        files: \.java$
+        require_serial: true
+        # Add an `exclude:` here for any files that intentionally trip a
+        # pattern (e.g. a CLI's own legitimate stdout print) -- see
+        # norma's own `.pre-commit-config.yaml` for a worked example.
