@@ -107,6 +107,13 @@ Enable the pre-commit hook (see `.pre-commit-config.yaml` -- requires
 pre-commit install
 ```
 
+Using norma in a *different* project? `docs/pre-commit-config.template.yaml`
+has a copy-pasteable hook block per language (Rust/Python/TypeScript/Java) --
+drop the ones you need into that project's own `.pre-commit-config.yaml` and
+run `pre-commit install` there. No pattern re-registration needed: by default
+every `norma` invocation on a machine reads the same SQLite DB (see above),
+so patterns registered once are already visible to every project's hook.
+
 ## 🏗️ Architecture
 
 ```

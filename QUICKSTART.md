@@ -131,6 +131,12 @@ pre-commit install
 `.pre-commit-config.yaml` runs `norma validate --language rust --json`
 over every staged `.rs` file on each commit.
 
+Want the same hook in another project? `docs/pre-commit-config.template.yaml`
+in this repo has ready-to-copy hook blocks per language (Rust/Python/
+TypeScript/Java) -- paste the ones you need into that project's own
+`.pre-commit-config.yaml` and run `pre-commit install` there. The pattern
+database is global per machine by default, so nothing needs re-registering.
+
 ## Troubleshooting
 
 **`norma: command not found`** — you skipped `cargo install --path .`, or
