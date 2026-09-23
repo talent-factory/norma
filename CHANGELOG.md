@@ -41,6 +41,10 @@ overwritten on the next merge.
 
 ### 📚 Documentation
 
+- Add reusable pre-commit hook template for other projects ([5bf8004](https://github.com/talent-factory/norma/commit/5bf800460c9a63aa3abfd9d00fba5136614be0e8))
+
+- Regenerate CHANGELOG.md via git-cliff ([300edeb](https://github.com/talent-factory/norma/commit/300edeb383114f36529946c08f9444e1decd3914))
+
 - Regenerate CHANGELOG.md via git-cliff ([54daba9](https://github.com/talent-factory/norma/commit/54daba9603de16ace3aff0786652d96c29910143))
 
 - Document the CHANGELOG.md merge=union rationale in DEVELOPMENT.md ([380055b](https://github.com/talent-factory/norma/commit/380055bf571720ea981db0def6fa3e3b54a251c5))
