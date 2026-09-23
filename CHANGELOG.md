@@ -5,6 +5,28 @@ All notable changes to this project. Generated automatically by
 every merge to `main` -- **do not edit by hand**, changes will be
 overwritten on the next merge.
 
+## [Unreleased]
+
+### 📚 Documentation
+
+- Regenerate CHANGELOG.md via git-cliff ([62a4dae](https://github.com/talent-factory/norma/commit/62a4daec823cb282d212aed05183b13a8d01cf27))
+
+- Regenerate CHANGELOG.md via git-cliff ([3aa37bc](https://github.com/talent-factory/norma/commit/3aa37bc323b6a6e90097e881d5e3a8134800c720))
+
+- Add reusable pre-commit hook template for other projects ([5bf8004](https://github.com/talent-factory/norma/commit/5bf800460c9a63aa3abfd9d00fba5136614be0e8))
+
+- Regenerate CHANGELOG.md via git-cliff ([300edeb](https://github.com/talent-factory/norma/commit/300edeb383114f36529946c08f9444e1decd3914))
+
+- Document the CHANGELOG.md merge=union rationale in DEVELOPMENT.md ([380055b](https://github.com/talent-factory/norma/commit/380055bf571720ea981db0def6fa3e3b54a251c5))
+
+
+### 🔩 Other Changes
+
+- Merge remote-tracking branch 'origin/main' into develop ([00e2c20](https://github.com/talent-factory/norma/commit/00e2c20f05214f3879a9346dfaa7e17b886858cc))
+
+- Merge remote-tracking branch 'origin/develop' into develop ([a4bd9d1](https://github.com/talent-factory/norma/commit/a4bd9d1b821a5223ea2b5f8f13a0ce34a75b9332))
+
+
 ## [2026.09.22] - 2026-09-22
 
 ### 🚀 Features
@@ -40,14 +62,6 @@ overwritten on the next merge.
 
 
 ### 📚 Documentation
-
-- Add reusable pre-commit hook template for other projects ([5bf8004](https://github.com/talent-factory/norma/commit/5bf800460c9a63aa3abfd9d00fba5136614be0e8))
-
-- Regenerate CHANGELOG.md via git-cliff ([300edeb](https://github.com/talent-factory/norma/commit/300edeb383114f36529946c08f9444e1decd3914))
-
-- Regenerate CHANGELOG.md via git-cliff ([54daba9](https://github.com/talent-factory/norma/commit/54daba9603de16ace3aff0786652d96c29910143))
-
-- Document the CHANGELOG.md merge=union rationale in DEVELOPMENT.md ([380055b](https://github.com/talent-factory/norma/commit/380055bf571720ea981db0def6fa3e3b54a251c5))
 
 - Regenerate CHANGELOG.md via git-cliff ([54daba9](https://github.com/talent-factory/norma/commit/54daba9603de16ace3aff0786652d96c29910143))
 
@@ -91,8 +105,6 @@ overwritten on the next merge.
 
 
 ### 🔩 Other Changes
-
-- Merge remote-tracking branch 'origin/develop' into develop ([a4bd9d1](https://github.com/talent-factory/norma/commit/a4bd9d1b821a5223ea2b5f8f13a0ce34a75b9332))
 
 - Merge remote-tracking branch 'origin/main' into develop ([d8973d1](https://github.com/talent-factory/norma/commit/d8973d16304a84ed5ae75fd908061c73e192ba23))
 
