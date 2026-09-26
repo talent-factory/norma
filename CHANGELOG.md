@@ -9,6 +9,8 @@ overwritten on the next merge.
 
 ### 📚 Documentation
 
+- Regenerate CHANGELOG.md via git-cliff after main merge ([580ff9e](https://github.com/talent-factory/norma/commit/580ff9e4010f143e26bc584f88a28fa5db1d2aeb))
+
 - Regenerate CHANGELOG.md via git-cliff ([62a4dae](https://github.com/talent-factory/norma/commit/62a4daec823cb282d212aed05183b13a8d01cf27))
 
 - Regenerate CHANGELOG.md via git-cliff ([3aa37bc](https://github.com/talent-factory/norma/commit/3aa37bc323b6a6e90097e881d5e3a8134800c720))
@@ -21,6 +23,8 @@ overwritten on the next merge.
 
 
 ### 🔩 Other Changes
+
+- ✨ feat: füge kuratierte, importierbare ast-grep Rule-Packs hinzu ([93d956f](https://github.com/talent-factory/norma/commit/93d956f8bf851bdd530847c0d96b986f5559b6c9))
 
 - Merge remote-tracking branch 'origin/main' into develop ([00e2c20](https://github.com/talent-factory/norma/commit/00e2c20f05214f3879a9346dfaa7e17b886858cc))
 
