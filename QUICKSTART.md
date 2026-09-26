@@ -67,6 +67,17 @@ The registry lives at `$XDG_DATA_HOME/norma/norma.db` (or
 norma somewhere else with the global `--db <PATH>` flag or the `NORMA_DB`
 environment variable.
 
+Want more than the 20 built-ins? `rule-packs/` in this repo ships 39
+further opt-in patterns (code-quality, architecture, encapsulation,
+safety, security), one directory per category:
+
+```bash
+norma import rule-packs/security --category security
+```
+
+See the README's "Ready-made rule packs" section for the full list and
+where each one came from.
+
 ## 5. Validate a file
 
 ```bash

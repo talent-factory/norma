@@ -257,6 +257,26 @@ Two things worth knowing before relying on a bulk import:
   will have those rules, and the utility definitions themselves, silently
   excluded (they have neither `id:` nor `rule:` in the shape this expects).
 
+### Ready-made rule packs
+
+`rule-packs/` ships 39 opt-in patterns, curated (not auto-generated) from
+the [ast-grep catalog](https://ast-grep.github.io/catalog/), real-world
+repos, and other permissively-licensed community rule collections --
+`default_patterns.rs`'s 20 built-in patterns are untouched by this.
+Structured by category, one directory per category, so a single `norma
+import` call keeps a consistent `--category` for everything it imports
+(ast-grep's own `RuleConfig` YAML has no per-document category field):
+
+```bash
+norma import rule-packs/security --category security
+norma import rule-packs/encapsulation --category encapsulation
+# ... or code-quality/, architecture/, safety/
+```
+
+See `.scratch/ast-grep-rule-pack-sourcing/map.md` for what's in each
+category, where every rule came from, and why it was adopted (or, for
+everything considered but rejected, why not).
+
 ## 🔧 Development
 
 ### Running Tests
