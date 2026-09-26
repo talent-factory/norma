@@ -1,0 +1,36 @@
+# Rule pack: ast-grep official catalog (https://ast-grep.github.io/catalog)
+#
+# Sourced from wayfinder ticket "ast-grep Catalog Analysis"
+# (.scratch/ast-grep-rule-pack-sourcing/issues/01-ast-grep-catalog-analysis.md).
+# Every rule below expresses design/architecture intent or a cross-cutting
+# coding standard that a mainstream linter for its language (Clippy/ESLint/
+# eslint-plugin-react/...) doesn't already cover -- the catalog's many
+# codemod/migration/search-demo/style rules were reviewed and rejected
+# against that boundary; see the ticket's "## Answer" for the full decided
+# list including rejections.
+#
+# Opt-in, not a default: import explicitly with
+#   norma import rule-packs/ast-grep-catalog.yaml --category code-quality
+# (`default_patterns.rs` is intentionally untouched by this pack).
+#
+# Ids are suffixed `-<language>` to match norma's own default-pattern
+# naming convention (see docs/adr/0002).
+---
+id: avoid-duplicate-export-rust
+message: >-
+  Re-exporting the same item under two different paths increases API
+  surface and confuses IDE autocomplete -- export it once with `pub`
+severity: warning
+language: Rust
+rule:
+  all:
+    - pattern: pub use $B::$C;
+    - inside:
+        kind: source_file
+        has:
+          pattern: pub mod $A;
+    - has:
+        pattern: $A
+        stopBy: end
+# Source: https://ast-grep.github.io/catalog/rust/avoid-duplicated-exports
+# Contributed upstream by Julius Lungys (voidpumpkin)

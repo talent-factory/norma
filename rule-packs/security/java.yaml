@@ -1,0 +1,212 @@
+# rule-packs/security/java.yaml
+#
+# Curated, generalized subset of coderabbitai/ast-grep-essentials
+# (Apache-2.0, https://github.com/coderabbitai/ast-grep-essentials).
+# Upstream has 36 Java security rules across several distinct concerns
+# (weak crypto, hardcoded secrets, cookie flags, XXE, command injection,
+# unencrypted sockets, weak TLS). This pack covers 7 of them, each
+# generalized/simplified from real upstream rules -- see each rule's
+# note for what it replaces and what was deliberately left out this
+# pass (cookie-secure-flag, cookie-samesite, 2 of 3 XXE feature-string
+# variants, ECB-mode/no-null-cipher/RSA-padding/MD5-digest-utils checks
+# were NOT independently verified and are not included here).
+#
+# Import with: norma import rule-packs/security --category security
+---
+id: weak-crypto-algorithm-java
+language: java
+severity: warning
+message: >-
+  Use of a weak or deprecated cryptographic algorithm (MD5, SHA-1, DES,
+  3DES, RC2, RC4, Blowfish, or bare "AES" which defaults to insecure ECB
+  mode). Use a modern algorithm: SHA-256+ for hashing, AES/GCM/NoPadding
+  for encryption.
+note: >-
+  [CWE-327] Use of a Broken or Risky Cryptographic Algorithm.
+  Generalizes 8 near-identical upstream rules (des-is-deprecated,
+  desede-is-deprecated, use-of-rc2, use-of-rc4, use-of-blowfish,
+  use-of-default-aes, use-of-md5, use-of-sha1), all sharing the same
+  `$X.getInstance("ALGO")` shape, into one rule with a combined
+  algorithm-name deny-list. use-of-rc4-java and use-of-rc2-java were
+  read in full and only check the bare algorithm name; des-is-deprecated
+  was also read in full and additionally matches "ALGO/MODE/PADDING"
+  transformation strings (e.g. "DES/CBC/PKCS5Padding") -- an
+  inconsistency in the upstream per-rule set (some algorithms' rules
+  check transformation strings, others don't) rather than a deliberate
+  design choice, so this generalized rule applies the transformation-
+  string check to every listed algorithm, not just DES: verified via
+  `norma validate` that "DES/CBC/PKCS5Padding" now matches (previously
+  didn't). AES is deliberately kept exact-match-only (no transformation
+  suffix allowed) since bare "AES" defaults to insecure ECB mode but
+  "AES/GCM/NoPadding" is the secure, recommended form -- flagging it too
+  would defeat the rule's own purpose.
+  [REFERENCES] https://owasp.org/Top10/A02_2021-Cryptographic_Failures
+rule:
+  pattern: $X.getInstance($ARGUMENT)
+constraints:
+  ARGUMENT:
+    kind: string_literal
+    has:
+      kind: string_fragment
+      regex: ^((MD5|SHA-?1|DES|3?DES(ede)?|RC2|RC4|Blowfish)(/.*)?|AES)$
+---
+id: hardcoded-secret-in-credentials-java
+language: java
+severity: warning
+message: >-
+  A secret is hard-coded in the application. Secrets stored in source
+  code, such as credentials, identifiers, and other types of sensitive
+  data, can be leaked and used by internal or external malicious actors.
+  Use environment variables to securely provide credentials or retrieve
+  them from a secure vault or HSM.
+note: >-
+  [CWE-798] Use of Hard-coded Credentials.
+  Generalizes upstream per-library rules (datanucleus-hardcoded-
+  connection-password, drivermanager-hardcoded-secret,
+  hardcoded-connection-password, hardcoded-secret-in-credentials,
+  java-jwt-hardcoded-secret, jedis-jedisclientconfig-hardcoded-password,
+  jedis-jedisfactory-hardcoded-password,
+  passwordauthentication-hardcoded-password,
+  system-setproperty-hardcoded-secret) into three shapes: a
+  password/secret-named setter or builder method call
+  (`x.setPassword("...")`, `builder.password("...")`,
+  `x.setConnectionPassword("...")`, `x.updatePassword("...")`),
+  `DriverManager.getConnection(url, user, "literal")`, and okhttp's
+  `Credentials.basic(user, "literal")`. Spot-checked against 4 of the 9
+  real upstream files after an initial draft missed
+  setConnectionPassword/updatePassword/Credentials.basic -- widened to
+  cover those; the positional 5-argument Jedis/JDO constructor and
+  `.create(...)` factory variants are deliberately still NOT covered
+  (too fragile to generalize safely by argument position alone).
+  [REFERENCES] https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+rule:
+  any:
+    - kind: method_invocation
+      all:
+        - has: { field: name, kind: identifier, regex: "(?i)^(set|update)?(connection)?(password|passwd|secret)$" }
+        - has:
+            field: arguments
+            kind: argument_list
+            has: { kind: string_literal, has: { kind: string_fragment } }
+    - pattern: DriverManager.getConnection($URL, $USER, $PASS)
+    - pattern: Credentials.basic($USER, $PASS)
+constraints:
+  PASS:
+    kind: string_literal
+    has: { kind: string_fragment }
+---
+# Sources:
+#   https://github.com/coderabbitai/ast-grep-essentials/blob/main/rules/java/security/cookie-httponly-false-java.yml
+#   https://github.com/coderabbitai/ast-grep-essentials/blob/main/rules/java/security/cookie-missing-httponly-java.yml
+# License: Apache-2.0
+# Adapted: merged both into one rule (explicit false OR never set).
+id: insecure-cookie-httponly-java
+language: java
+severity: warning
+message: >-
+  A cookie is added to the response without the HttpOnly flag set (or
+  with it explicitly set to false). HttpOnly instructs the browser to
+  forbid client-side script access, mitigating XSS-based cookie theft.
+note: >-
+  [CWE-1004] Sensitive Cookie Without 'HttpOnly' Flag.
+  [REFERENCES] https://owasp.org/www-community/HttpOnly
+rule:
+  any:
+    - pattern: $COOKIE.setHttpOnly(false);
+    - pattern: $RESPONSE.addCookie($COOKIE);
+      all:
+        - not: { follows: { stopBy: end, pattern: $COOKIE.setValue(""); } }
+        - not: { follows: { stopBy: end, pattern: $COOKIE.setHttpOnly($$$); } }
+---
+# Source: https://github.com/coderabbitai/ast-grep-essentials/blob/main/rules/java/security/documentbuilderfactory-external-general-entities-true-java.yml
+# License: Apache-2.0
+# Adapted: dropped the variable-indirection matching (the original also
+# tracked `boolean b = true; factory.setFeature(URL, b);`), keeping only
+# the direct literal-argument call. The other 2 upstream XXE variants
+# (external-parameter-entities, disallow-doctype-decl-false) are NOT
+# included this pass -- not independently verified.
+id: xxe-external-general-entities-java
+language: java
+severity: warning
+message: >-
+  XML external general entities are explicitly enabled on a
+  DocumentBuilderFactory (or similar), which is vulnerable to XXE
+  attacks (SSRF, file disclosure). Disable this feature.
+note: >-
+  [CWE-611] Improper Restriction of XML External Entity Reference.
+  [REFERENCES] https://blog.sonarsource.com/secure-xml-processor
+rule:
+  kind: method_invocation
+  all:
+    - has: { field: name, kind: identifier, regex: ^setFeature$ }
+    - has:
+        field: arguments
+        kind: argument_list
+        all:
+          - has: { kind: string_literal, regex: '"http://xml\.org/sax/features/external-general-entities"' }
+          - has: { regex: "^true$" }
+---
+# Source: https://github.com/coderabbitai/ast-grep-essentials/blob/main/rules/java/security/weak-ssl-context-java.yml
+# License: Apache-2.0
+id: weak-ssl-context-java
+language: java
+severity: warning
+message: >-
+  An insecure SSL/TLS context was requested. TLS 1.0, 1.1, and all SSL
+  versions are deprecated and weak. Use SSLContext.getInstance("TLSv1.3")
+  or "TLSv1.2".
+note: >-
+  [CWE-326] Inadequate Encryption Strength.
+  [REFERENCES] https://tools.ietf.org/id/draft-ietf-tls-oldversions-deprecate-02.html
+rule:
+  pattern: SSLContext.getInstance($CONTEXT)
+constraints:
+  CONTEXT:
+    kind: string_literal
+    not:
+      has:
+        kind: string_fragment
+        regex: ^(TLSv1\.2|TLSv1\.3)$
+---
+# Source: https://github.com/coderabbitai/ast-grep-essentials/blob/main/rules/java/security/unencrypted-socket-java.yml
+# License: Apache-2.0
+id: unencrypted-socket-java
+language: java
+severity: info
+message: >-
+  Use of a plain (non-TLS) java.net Socket/ServerSocket. Traffic can be
+  read or tampered with by anyone on the network path. Use SSLSocket via
+  SSLSocketFactory/SSLServerSocketFactory instead.
+note: >-
+  [CWE-319] Cleartext Transmission of Sensitive Information.
+  [REFERENCES] https://owasp.org/Top10/A02_2021-Cryptographic_Failures
+rule:
+  any:
+    - pattern: new ServerSocket($$$)
+    - pattern: new Socket($$$)
+---
+# Source: https://github.com/coderabbitai/ast-grep-essentials/blob/main/rules/java/security/simple-command-injection-direct-input-java.yml
+# License: Apache-2.0
+# Adapted: dropped the Spring-MVC-specific "parameter is annotated
+# @RequestBody/@PathVariable/etc. and not a primitive type" guard;
+# flags any Runtime.getRuntime().exec() call whose argument is not a
+# literal (i.e. built from a variable), which is broader but simpler.
+id: command-injection-runtime-exec-java
+language: java
+severity: warning
+message: >-
+  `Runtime.getRuntime().exec(...)` is called with a non-literal
+  argument. If it can be influenced by untrusted input this is OS
+  command injection. Validate/allowlist the input, or avoid shelling
+  out entirely.
+note: >-
+  [CWE-78] Improper Neutralization of Special Elements used in an OS Command.
+  [REFERENCES] https://owasp.org/Top10/A03_2021-Injection
+rule:
+  pattern: Runtime.getRuntime().exec($SOURCE)
+constraints:
+  SOURCE:
+    not:
+      any:
+        - kind: string_literal
+        - kind: array_creation_expression

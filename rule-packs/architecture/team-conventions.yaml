@@ -1,0 +1,31 @@
+# Team-conventions rule pack -- patterns mined from Daniel's own active
+# repos (see .scratch/ast-grep-rule-pack-sourcing/issues/02-own-repo-pattern-mining.md
+# for the full survey and rationale). Import with:
+#   norma import rule-packs/team-conventions.yaml --category architecture
+#
+# NOTE on TSX: this rule is written for `language: TypeScript`. If you also
+# need it to fire on `.tsx` files, register the same `rule:` block again
+# under `language: Tsx` (ast-grep treats TSX as a distinct grammar from
+# plain TypeScript) -- not pre-verified here, check `norma list-patterns`
+# / SUPPORTED_LANGUAGES for the exact accepted string first.
+#
+# NOTE on false positives: this pattern matches *every* raw fetch()/axios
+# call, including the ones inside your own api-client layer (where they
+# belong). Exclude that layer via your project's own pre-commit `exclude:`
+# glob (e.g. `exclude: '^apps/web/src/lib/'`) -- the same approach norma's
+# own .pre-commit-config.yaml uses to exclude src/main.rs from its
+# no-debug-print rule, rather than trying to express "which directory" as
+# part of the AST rule itself.
+---
+id: direct-fetch-bypass-typescript
+message: >-
+  Raw fetch()/axios call outside the project's api-client layer -- route
+  through the shared data-fetching module instead (e.g. lib/*Api.ts +
+  react-query/useQuery) so auth headers, error handling, and base-URL
+  config stay centralized instead of re-implemented per call site
+severity: warning
+language: TypeScript
+rule:
+  any:
+    - pattern: fetch($$$ARGS)
+    - pattern: axios.$METHOD($$$ARGS)

@@ -1,0 +1,154 @@
+# rule-packs/security/typescript.yaml
+#
+# Curated, generalized subset of coderabbitai/ast-grep-essentials
+# (Apache-2.0, https://github.com/coderabbitai/ast-grep-essentials).
+# Import-tracing/aliasing guards were dropped for simplicity -- see each
+# rule's note.
+#
+# Import with: norma import rule-packs/security --category security
+---
+id: hardcoded-secret-in-call-typescript
+language: TypeScript
+severity: warning
+message: >-
+  A secret is hard-coded in the application. Secrets stored in source
+  code, such as credentials, identifiers, and other types of sensitive
+  data, can be leaked and used by internal or external malicious actors.
+  Use environment variables or a secure vault/HSM instead.
+note: >-
+  [CWE-798] Use of Hard-coded Credentials.
+  Generalizes upstream's express-session-hardcoded-secret-typescript into
+  a library-agnostic check: any call or constructor passing a
+  secret/password/token-shaped object property with a non-empty string
+  literal. node-sequelize-hardcoded-secret-argument-typescript (a bare
+  *positional* constructor argument, no property name to key off) is
+  deliberately NOT covered -- same reasoning as the Java pack's dropped
+  Jedis/JDO positional-constructor variants: too fragile to generalize
+  by argument position alone. Post-hoc fix: the initial draft also only
+  matched `kind: call_expression`, silently missing every `new X(...)`
+  constructor call (including the very `session(...)` shape it was
+  built for, once wrapped e.g. `app.use(session({...}))` -- verified
+  that one specifically still matches since `session(...)` itself is a
+  plain call, but any secret passed via a class constructor was missed
+  until this fix).
+  [REFERENCES] https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+rule:
+  any:
+    - kind: call_expression
+    - kind: new_expression
+  has:
+    kind: arguments
+    has:
+      kind: object
+      has:
+        kind: pair
+        all:
+          - has: { field: key, regex: ^(secret|password|token)$ }
+          - has: { field: value, kind: string, regex: "^[\"'].+[\"']$" }
+---
+id: empty-password-accepted-typescript
+language: TypeScript
+severity: warning
+message: >-
+  The application creates a connection or session with an empty
+  password. Enforce authentication by using environment variables to
+  securely provide credentials or retrieving them from a secure
+  vault/HSM.
+note: >-
+  [CWE-287] Improper Authentication.
+  Generalizes into a library-agnostic check: any call or constructor
+  passing an empty string literal as a password-shaped object property.
+  node-sequelize-empty-password-argument-typescript (a bare *positional*
+  constructor argument) is deliberately NOT covered -- same reasoning as
+  the sibling `hardcoded-secret-in-call-typescript` rule. Post-hoc fix:
+  the initial draft (a) only matched `kind: call_expression`, missing
+  every `new X(...)` constructor, and (b) tried to cover the positional
+  Sequelize case with a "some argument is an empty string literal"
+  branch that was far too broad -- it fired on any call passing an
+  unrelated empty string anywhere (verified false positives on e.g.
+  `someFn("a", "b", "")`), so that branch was dropped rather than fixed.
+  [REFERENCES] https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+rule:
+  any:
+    - kind: call_expression
+    - kind: new_expression
+  has:
+    kind: arguments
+    has:
+      kind: object
+      has:
+        kind: pair
+        all:
+          - has: { field: key, regex: ^password$ }
+          - has: { field: value, kind: string, regex: "^[\"']{2}$" }
+---
+# Source: https://github.com/coderabbitai/ast-grep-essentials/blob/main/rules/typescript/security/jwt-simple-noverify-typescript.yml
+# License: Apache-2.0
+# Adapted: dropped the `require('jwt-simple')` import-tracing guard.
+id: jwt-decode-without-verify-typescript
+language: TypeScript
+severity: warning
+message: >-
+  A JWT is decoded with verification disabled (or a non-boolean
+  "noVerify" argument). An unverified token's claims can be forged by a
+  malicious actor. Always verify the signature before trusting the
+  payload.
+note: >-
+  [CWE-347] Improper Verification of Cryptographic Signature.
+  [REFERENCES] https://www.npmjs.com/package/jwt-simple
+rule:
+  pattern: $JWT.decode($TOKEN, $SECRET, true, $$$)
+---
+# Source: https://github.com/coderabbitai/ast-grep-essentials/blob/main/rules/typescript/security/node-rsa-weak-key-typescript.yml
+# License: Apache-2.0
+# Adapted: dropped the require/import-tracing for crypto/node-rsa/
+# node-forge and the multi-shape number-literal matching; keeps the
+# core "RSA key size property below 2048" concept only for the most
+# common `crypto.generateKeyPairSync('rsa', { modulusLength: N })` shape.
+# `new NodeRSA({ b: N })` and `forge.pki.rsa.generateKeyPair({ bits: N })`
+# were dropped, not verified this pass.
+# Post-hoc fix: the initial draft's threshold regex (`^([0-9]{1,3}|1[0-9]{3})$`)
+# only covered 0-1999, silently missing the real "below 2048" range's
+# 2000-2047 -- verified via `norma validate` that 2000/2047 slipped
+# through before this fix. Widened to 0-2047.
+id: weak-rsa-key-size-typescript
+language: TypeScript
+severity: warning
+message: >-
+  RSA key generated with a modulus length below 2048 bits, which NIST
+  considers weak. Use at least 2048 bits (3072+ for new systems).
+note: >-
+  [CWE-326] Inadequate Encryption Strength.
+  [REFERENCES] https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html#algorithms
+utils:
+  weak-modulus-length:
+    kind: pair
+    all:
+      - has: { field: key, regex: ^modulusLength$ }
+      - has:
+          field: value
+          kind: number
+          regex: ^(0|[1-9][0-9]{0,2}|1[0-9]{3}|20[0-3][0-9]|204[0-7])$
+rule:
+  kind: call_expression
+  has:
+    kind: arguments
+    has:
+      kind: object
+      has:
+        matches: weak-modulus-length
+---
+# Source: https://github.com/coderabbitai/ast-grep-essentials/blob/main/rules/typescript/security/detect-angular-sce-disabled-typescript.yml
+# License: Apache-2.0
+id: angular-sce-disabled-typescript
+language: TypeScript
+severity: warning
+message: >-
+  AngularJS's Strict Contextual Escaping (SCE) is being disabled
+  ($sceProvider.enabled(false)). This removes AngularJS's built-in XSS
+  protection for the whole application.
+note: >-
+  [CWE-79] Improper Neutralization of Input During Web Page Generation.
+  [REFERENCES] https://docs.angularjs.org/api/ng/service/$sce
+rule:
+  pattern: $sceProvider.enabled(false)
