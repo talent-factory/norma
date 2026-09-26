@@ -1,0 +1,66 @@
+# Rule pack: ast-grep official catalog (https://ast-grep.github.io/catalog)
+#
+# Sourced from wayfinder ticket "ast-grep Catalog Analysis"
+# (.scratch/ast-grep-rule-pack-sourcing/issues/01-ast-grep-catalog-analysis.md).
+# Every rule below expresses design/architecture intent or a cross-cutting
+# coding standard that a mainstream linter for its language (Clippy/ESLint/
+# eslint-plugin-react/...) doesn't already cover -- the catalog's many
+# codemod/migration/search-demo/style rules were reviewed and rejected
+# against that boundary; see the ticket's "## Answer" for the full decided
+# list including rejections.
+#
+# Opt-in, not a default: import explicitly with
+#   norma import rule-packs/ast-grep-catalog.yaml --category code-quality
+# (`default_patterns.rs` is intentionally untouched by this pack).
+#
+# Ids are suffixed `-<language>` to match norma's own default-pattern
+# naming convention (see docs/adr/0002).
+---
+id: no-await-in-promise-all-typescript
+message: Avoid `await` inside a `Promise.all(...)` array -- it defeats parallel execution
+severity: warning
+language: TypeScript
+rule:
+  pattern: await $A
+  inside:
+    pattern: Promise.all($_)
+    stopBy:
+      not: { any: [{ kind: array }, { kind: arguments }] }
+fix: $A
+# Source: https://ast-grep.github.io/catalog/typescript/no-await-in-promise-all
+# (upstream rule targets language: javascript; adapted to TypeScript here
+# since norma ships TypeScript, not JavaScript, as a default-pattern
+# language -- the pattern shape is identical in both grammars)
+# Contributed upstream by Alvar Lagerlöf
+---
+id: unnecessary-react-hook-tsx
+message: Function named like a hook (use*) that calls no other hook -- rewrite as a plain function
+severity: warning
+language: Tsx
+utils:
+  hook_call:
+    has:
+      kind: call_expression
+      stopBy: end
+      has:
+        any:
+          - kind: identifier
+            regex: ^use
+          - kind: member_expression
+            has:
+              field: property
+              regex: ^use
+rule:
+  any:
+    - pattern: function $FUNC($$$) { $$$ }
+    - pattern: let $FUNC = ($$$) => $$$
+    - pattern: const $FUNC = ($$$) => $$$
+  has:
+    pattern: $BODY
+    kind: statement_block
+    stopBy: end
+constraints:
+  FUNC: { regex: ^use }
+  BODY: { not: { matches: hook_call } }
+# Source: https://ast-grep.github.io/catalog/tsx/unnecessary-react-hook
+# Contributed upstream by Herrington Darkholme (hd_nvim)

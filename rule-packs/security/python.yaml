@@ -1,0 +1,197 @@
+# rule-packs/security/python.yaml
+#
+# Curated, generalized subset of coderabbitai/ast-grep-essentials
+# (Apache-2.0, https://github.com/coderabbitai/ast-grep-essentials).
+# The upstream repo has 48 Python security rules, most of them the same
+# 2 checks (hardcoded secret / empty password) repeated once per
+# database-or-auth library (psycopg2, pymongo, redis, ldap3, ...). Rather
+# than importing 40+ near-duplicates, this pack collapses each repeated
+# concept into one generalized rule and keeps the genuinely distinct
+# checks close to their original shape (import-tracing/aliasing guards
+# from the originals were dropped for simplicity -- see each rule's note).
+#
+# Import with: norma import rule-packs/security --category security
+---
+id: hardcoded-secret-in-call-python
+language: python
+severity: warning
+message: >-
+  A secret is hard-coded in the application. Secrets stored in source
+  code, such as credentials, identifiers, and other types of sensitive
+  data, can be leaked and used by internal or external malicious actors.
+  Use environment variables to securely provide credentials and other
+  secrets, or retrieve them from a secure vault or Hardware Security
+  Module (HSM).
+note: >-
+  [CWE-798] Use of Hard-coded Credentials.
+  Generalizes ~25 near-duplicate upstream rules, one per library
+  (python-psycopg2-hardcoded-secret, python-redis-hardcoded-secret,
+  python-pymongo-hardcoded-secret, python-mysql-hardcoded-secret,
+  jwt-python-hardcoded-secret, openai-hardcoded-secret,
+  hashids-with-django/flask-secret, python-elasticsearch-hardcoded-
+  bearer-auth, and the rest of the *-hardcoded-secret family) into one
+  library-agnostic check: any call passing a non-empty string literal as
+  a password/secret/token/key/auth-shaped keyword argument. Broader than
+  the originals (no per-library call-site verification, no import
+  tracing) -- expect more false positives on test fixtures than the
+  per-library originals had; exclude test paths via your pre-commit
+  `exclude:` glob if noisy.
+  [REFERENCES] https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+rule:
+  kind: call
+  has:
+    kind: argument_list
+    has:
+      kind: keyword_argument
+      all:
+        - has:
+            field: name
+            kind: identifier
+            regex: ^(password|passwd|secret|token|api_key|apikey|auth|salt|bearer_token)$
+        - has:
+            field: value
+            kind: string
+            has:
+              kind: string_content
+  not:
+    has:
+      stopBy: end
+      kind: ERROR
+---
+id: empty-password-accepted-python
+language: python
+severity: warning
+message: >-
+  The application creates a connection with an empty password. This can
+  lead to unauthorized access by either an internal or external
+  malicious actor. Enforce authentication when connecting to a service
+  by using environment variables to securely provide credentials or
+  retrieving them from a secure vault or HSM.
+note: >-
+  [CWE-287] Improper Authentication.
+  Generalizes ~18 near-duplicate upstream rules, one per library
+  (python-psycopg2-empty-password, python-redis-empty-password,
+  python-mariadb-empty-password, python-ldap3-empty-password, etc.) into
+  one library-agnostic check: any call passing a literal empty string
+  ("") as a password/passwd keyword argument.
+  [REFERENCES] https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+rule:
+  kind: call
+  has:
+    kind: argument_list
+    has:
+      kind: keyword_argument
+      all:
+        - has:
+            field: name
+            kind: identifier
+            regex: ^(password|passwd)$
+        - has:
+            field: value
+            kind: string
+            not:
+              has:
+                kind: string_content
+  not:
+    has:
+      stopBy: end
+      kind: ERROR
+---
+# Source: https://github.com/coderabbitai/ast-grep-essentials/blob/main/rules/python/security/insecure-cipher-algorithm-rc4-python.yml
+# License: Apache-2.0
+# Adapted: dropped the import-tracing guard, kept the 3 call shapes verbatim.
+id: insecure-weak-cipher-rc4-python
+language: python
+severity: warning
+message: >-
+  Detected ARC4 (RC4) cipher algorithm, which is considered insecure and
+  not cryptographically secure. Use a modern authenticated cipher such
+  as AES-GCM, ChaCha20-Poly1305, or Salsa20 instead.
+note: >-
+  [CWE-327] Use of a Broken or Risky Cryptographic Algorithm.
+  [REFERENCES] https://www.pycryptodome.org/src/cipher/cipher
+rule:
+  kind: call
+  any:
+    - pattern: ARC4.new($$$ARGS)
+    - pattern: Crypto.Cipher.ARC4.new($$$ARGS)
+    - pattern: Cryptodome.Cipher.ARC4.new($$$ARGS)
+---
+# Source: https://github.com/coderabbitai/ast-grep-essentials/blob/main/rules/python/security/debug-enabled-python.yml
+# License: Apache-2.0
+# Adapted: dropped the Flask-import-context guard -- flags any app.run(debug=True).
+id: debug-mode-enabled-python
+language: python
+severity: warning
+message: >-
+  Detected a Flask app run with debug=True. Do not deploy to production
+  with this flag enabled -- Werkzeug's debugger exposes an interactive
+  shell that leaks source code and can execute arbitrary code.
+note: >-
+  [CWE-489] Active Debug Code.
+  [REFERENCES] https://labs.detectify.com/2015/10/02/how-patreon-got-hacked-publicly-exposed-werkzeug-debugger/
+rule:
+  kind: call
+  all:
+    - has:
+        kind: attribute
+        all:
+          - has: { kind: identifier, regex: ^app$ }
+          - has: { kind: identifier, regex: ^run$ }
+    - has:
+        kind: argument_list
+        has:
+          kind: keyword_argument
+          regex: "^debug=True$"
+---
+# Source: https://github.com/coderabbitai/ast-grep-essentials/blob/main/rules/python/security/avoid-mktemp-python.yml
+# License: Apache-2.0
+# Adapted: dropped the import-tracing guard for the bare-`mktemp` variant.
+id: insecure-temp-file-mktemp-python
+language: python
+severity: warning
+message: >-
+  `tempfile.mktemp()` is deprecated and insecure -- an attacker can
+  create or modify the file at the returned path before your code opens
+  it (a TOCTOU race). Use `tempfile.NamedTemporaryFile(delete=False)`
+  instead.
+note: >-
+  [CWE-377] Insecure Temporary File.
+  [REFERENCES] https://docs.python.org/3/library/tempfile.html#tempfile.mktemp
+rule:
+  kind: call
+  any:
+    - pattern: tempfile.mktemp($$$ARGS)
+    - pattern: mktemp($$$ARGS)
+---
+# Source: https://github.com/coderabbitai/ast-grep-essentials/blob/main/rules/python/security/avoid_app_run_with_bad_host-python.yml
+# License: Apache-2.0
+# Adapted: dropped the import-tracing guard.
+id: flask-run-exposed-host-python
+language: python
+severity: warning
+message: >-
+  Running a Flask app with host="0.0.0.0" binds it to every network
+  interface, which can expose a development server publicly. Bind to
+  127.0.0.1 for local development, or gate the host via configuration
+  for deliberate production deployments.
+note: >-
+  [CWE-668] Exposure of Resource to Wrong Sphere.
+  [REFERENCES] https://owasp.org/Top10/A01_2021-Broken_Access_Control
+rule:
+  kind: call
+  all:
+    - has:
+        kind: attribute
+        all:
+          - has: { kind: identifier, regex: ^app$ }
+          - has: { kind: identifier, regex: ^run$ }
+    - has:
+        kind: argument_list
+        any:
+          - has: { kind: string, regex: ^"0.0.0.0"$ }
+          - has:
+              kind: keyword_argument
+              all:
+                - has: { kind: identifier, regex: ^host$ }
+                - has: { kind: string, regex: ^"0.0.0.0"$ }

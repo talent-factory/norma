@@ -1,0 +1,122 @@
+# rule-packs/community.yaml
+#
+# Rules adopted from permissively-licensed external ast-grep rule repos
+# found on GitHub (see .scratch/ast-grep-rule-pack-sourcing/issues/03-github-external-rule-repos.md
+# for the full decided adopt/defer/reject list and the license-blocked log).
+# Import with: norma import rule-packs/community.yaml --category <category>
+---
+# Source: https://github.com/Zerkath/ast-grep-rules/blob/main/rules/python/log-and-reraise.yml
+# License: MIT
+id: log-and-reraise
+language: python
+severity: warning
+message: >
+  Logging then re-raising adds no information — the edge handler will log the exception anyway, 
+  so this produces duplicate log entries that complicate triage.
+  Either let the exception propagate (drop the try/except), or handle it locally (don't re-raise).
+rule:
+  kind: except_clause
+  all:
+    - has:
+        stopBy: end
+        pattern: raise
+    - has:
+        stopBy: end
+        kind: call
+        has:
+          field: function
+          kind: attribute
+          has:
+            field: attribute
+            regex: ^(debug|info|warning|warn|error|exception|critical|fatal|log)$
+---
+# Source: https://github.com/Zerkath/ast-grep-rules/blob/main/rules/python/prefer-logger-exception.yml
+# License: MIT
+id: prefer-logger-exception
+language: python
+severity: hint
+message: >
+  `traceback.print_exc()` writes the traceback to stderr without timestamps,
+  log levels, or correlation context, and bypasses the project's logging
+  configuration. Inside an `except` block, `logger.exception("...")` records
+  the same traceback at ERROR level through the normal log pipeline.
+rule:
+  any:
+    - pattern: traceback.print_exc()
+    - pattern: traceback.print_exc($$$)
+---
+# Source: https://github.com/Zerkath/ast-grep-rules/blob/main/rules/java/print-stack-trace.yml
+# License: MIT
+id: print-stack-trace-java
+language: java
+severity: warning
+message: >
+  `.printStackTrace()` writes to stderr without log levels, timestamps, or correlation context.
+  Use a logger instead: `logger.error("...", exception)` or `logger.warn("...", exception)`
+  to record the exception through the normal logging pipeline.
+rule:
+  kind: method_invocation
+  has:
+    field: name
+    regex: ^printStackTrace$
+---
+# Source: https://github.com/joshuadavidthomas/ast-grep-rules/blob/main/rules/typescript-no-chained-type-assertions.yml
+# License: MIT
+id: typescript-no-chained-type-assertions
+language: TypeScript
+severity: error
+message: "Do not chain type assertions; keep the original type or parse unknown input at its boundary."
+note: "A second as or angle-bracket assertion throws away the type already in hand and invents the next one. Chains made only of as const or <const> are allowed."
+utils:
+  typed-assertion-target:
+    any:
+      - kind: predefined_type
+      - kind: type_identifier
+      - kind: nested_type_identifier
+      - kind: generic_type
+      - kind: object_type
+      - kind: array_type
+      - kind: tuple_type
+      - kind: union_type
+      - kind: intersection_type
+      - kind: literal_type
+      - kind: parenthesized_type
+      - kind: function_type
+      - kind: constructor_type
+      - kind: lookup_type
+      - kind: type_query
+      - kind: index_type_query
+      - kind: readonly_type
+      - kind: template_literal_type
+      - kind: conditional_type
+      - kind: this_type
+  assertion-chain:
+    any:
+      - kind: as_expression
+        has:
+          kind: as_expression
+          stopBy: end
+      - kind: type_assertion
+        has:
+          kind: type_assertion
+          stopBy: end
+      - all:
+          - kind: as_expression
+          - has:
+              kind: type_assertion
+              stopBy: end
+      - all:
+          - kind: type_assertion
+          - has:
+              kind: as_expression
+              stopBy: end
+rule:
+  all:
+    - matches: assertion-chain
+    - has:
+        matches: typed-assertion-target
+        stopBy: end
+    - not:
+        inside:
+          matches: assertion-chain
+          stopBy: end

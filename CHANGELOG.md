@@ -5,6 +5,28 @@ All notable changes to this project. Generated automatically by
 every merge to `main` -- **do not edit by hand**, changes will be
 overwritten on the next merge.
 
+## [Unreleased]
+
+### 📚 Documentation
+
+- Regenerate CHANGELOG.md via git-cliff ([8f8da84](https://github.com/talent-factory/norma/commit/8f8da84907e6c2834a364e9e24672b4fbf16f72e))
+
+- Regenerate CHANGELOG.md via git-cliff ([a5e56a5](https://github.com/talent-factory/norma/commit/a5e56a5c6d86a9e4aea586ec3f795f79fe552ec5))
+
+- Regenerate CHANGELOG.md via git-cliff ([29c2044](https://github.com/talent-factory/norma/commit/29c20440964ecb30c7e820dd39c71eed217e6dd1))
+
+- Verlinke rule-packs/ in README und QUICKSTART ([595b553](https://github.com/talent-factory/norma/commit/595b55305d0622bdc44c979006a537245717753f))
+
+
+### 🔩 Other Changes
+
+- Merge remote-tracking branch 'origin/main' into develop ([06e65bf](https://github.com/talent-factory/norma/commit/06e65bf77b02db029134577d3f048af39b0a48bd))
+
+- Merge remote-tracking branch 'origin/develop' into develop ([ae2392d](https://github.com/talent-factory/norma/commit/ae2392db9a0eb545969ce037bc82489615ce1c7d))
+
+- ✨ feat: füge kuratierte, importierbare ast-grep Rule-Packs hinzu ([93d956f](https://github.com/talent-factory/norma/commit/93d956f8bf851bdd530847c0d96b986f5559b6c9))
+
+
 ## [2026.09.23] - 2026-09-23
 
 ### 📚 Documentation
