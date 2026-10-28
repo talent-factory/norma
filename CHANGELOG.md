@@ -14,6 +14,10 @@ overwritten on the next merge.
 
 ### 📚 Documentation
 
+- Keep rust-style-guide research findings on develop ([34a858e](https://github.com/talent-factory/norma/commit/34a858e08515c5f9b57f6742bc4c775c93fb8a35))
+
+- Regenerate CHANGELOG.md via git-cliff ([82c9abd](https://github.com/talent-factory/norma/commit/82c9abd77d6dbeb40568e572d31081751001313a))
+
 - Document per-guide Rust style packs (79 packs total) ([0f7c0ff](https://github.com/talent-factory/norma/commit/0f7c0ff1c6c9f2e32b50aca87b8760b219cca053))
 
 - Regenerate CHANGELOG.md via git-cliff ([58c9414](https://github.com/talent-factory/norma/commit/58c94149b01219cd6f2301ba9eb52874c81e43a8))
