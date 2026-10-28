@@ -14,6 +14,10 @@ overwritten on the next merge.
 
 ### 📚 Documentation
 
+- Add third-party benchmark to dogfood ticket ([1659317](https://github.com/talent-factory/norma/commit/165931747296cb1747a9ec0bb660a0a378fb5ffa))
+
+- Regenerate CHANGELOG.md via git-cliff ([4139747](https://github.com/talent-factory/norma/commit/41397472b8ce85e9261d3cf42330a8668d18bf63))
+
 - Keep rust-style-guide research findings on develop ([34a858e](https://github.com/talent-factory/norma/commit/34a858e08515c5f9b57f6742bc4c775c93fb8a35))
 
 - Regenerate CHANGELOG.md via git-cliff ([82c9abd](https://github.com/talent-factory/norma/commit/82c9abd77d6dbeb40568e572d31081751001313a))
