@@ -14,6 +14,10 @@ overwritten on the next merge.
 
 ### 📚 Documentation
 
+- Document per-guide Rust style packs (79 packs total) ([0f7c0ff](https://github.com/talent-factory/norma/commit/0f7c0ff1c6c9f2e32b50aca87b8760b219cca053))
+
+- Regenerate CHANGELOG.md via git-cliff ([58c9414](https://github.com/talent-factory/norma/commit/58c94149b01219cd6f2301ba9eb52874c81e43a8))
+
 - Resolve dogfood check, close rust-style-guide-rule-packs map ([16a63a9](https://github.com/talent-factory/norma/commit/16a63a91a9ef5320910db3de8da52c0bc246a060))
 
 - Regenerate CHANGELOG.md via git-cliff ([7f2ad6a](https://github.com/talent-factory/norma/commit/7f2ad6a721bfc7bdd471b51a5176e89979e1c0a1))
