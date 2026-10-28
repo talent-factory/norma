@@ -7,7 +7,14 @@ overwritten on the next merge.
 
 ## [Unreleased]
 
+### 🚀 Features
+
+- Add Google, official and API-guideline Rust style packs (40 rules) ([0e5b0a7](https://github.com/talent-factory/norma/commit/0e5b0a763ccb44b7019ac0870f30ef6ff56919f2))
+
+
 ### 📚 Documentation
+
+- Regenerate CHANGELOG.md via git-cliff ([d321e1a](https://github.com/talent-factory/norma/commit/d321e1aa92f33adcae25ec1c6dfbd43bce5b705e))
 
 - Chart rust-style-guide-rule-packs wayfinder map, resolve research tickets 01-03 ([204c1da](https://github.com/talent-factory/norma/commit/204c1daad421271c5f457ddae6d59825b4169060))
 
