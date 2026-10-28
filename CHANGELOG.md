@@ -9,6 +9,10 @@ overwritten on the next merge.
 
 ### 📚 Documentation
 
+- Chart rust-style-guide-rule-packs wayfinder map, resolve research tickets 01-03 ([204c1da](https://github.com/talent-factory/norma/commit/204c1daad421271c5f457ddae6d59825b4169060))
+
+- Regenerate CHANGELOG.md via git-cliff after main merge ([9946821](https://github.com/talent-factory/norma/commit/9946821c6ce37a2f12f66072b6737191f3445eda))
+
 - Regenerate CHANGELOG.md via git-cliff ([8f8da84](https://github.com/talent-factory/norma/commit/8f8da84907e6c2834a364e9e24672b4fbf16f72e))
 
 - Regenerate CHANGELOG.md via git-cliff ([a5e56a5](https://github.com/talent-factory/norma/commit/a5e56a5c6d86a9e4aea586ec3f795f79fe552ec5))
