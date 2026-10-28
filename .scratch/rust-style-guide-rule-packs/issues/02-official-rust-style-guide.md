@@ -28,3 +28,5 @@ Findings: Branch `research/official-rust-style-guide` (Commit `3de3cc6`, nicht g
 - Drei Naming-Regeln sind rejected, weil rustc sie schon prüft. `Cargo.toml`-Regeln scheiden aus, weil `ast-grep-language 0.45.3` kein TOML kennt.
 - Der Guide empfiehlt `r#crate`, rustc lehnt das ab; der Range-Abschnitt widerspricht sich selbst.
 - **Map-Präzisierung:** Die Linter-Grenze umfasst auch rustc-Default-Lints (`non_snake_case`, `unused_parens`, `missing_abi`).
+
+Die Findings-Datei liegt zusätzlich auf develop unter `research/02-official-rust-style-guide.md`; der Research-Branch ist damit entbehrlich.

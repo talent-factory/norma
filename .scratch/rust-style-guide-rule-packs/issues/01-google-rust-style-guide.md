@@ -27,3 +27,5 @@ Findings: Branch `research/google-rust-style-guide` (Commit `eeb38d6`, nicht gep
 - Der Guide ist intern uneinheitlich (`new_with_foo` vs. `new_from_foo`).
 - Clippy-Lints stammen aus `clippy-driver -W help` (Clippy 0.1.99), weil die Web-Lintliste ohne JavaScript nicht lesbar war; andere Clippy-Versionen können abweichen.
 - Zu bestätigen in Ticket 04: G-09 (`use` aus einem Modul, rustfmt-Option nur Nightly) und G-21 (`&Option<T>`, Clippy-Lint nur pedantic) stehen als adopt, liegen aber an der Linter-Grenze.
+
+Die Findings-Datei liegt zusätzlich auf develop unter `research/01-google-rust-style-guide.md`; der Research-Branch ist damit entbehrlich.

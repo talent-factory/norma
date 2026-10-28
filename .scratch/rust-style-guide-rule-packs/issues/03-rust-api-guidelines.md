@@ -29,3 +29,5 @@ Findings: Branch `research/rust-api-guidelines` (Commit `4e1c84b`, nicht gepusht
 - `wrong_self_convention` greift bei exportierter API per Default nicht.
 - ast-grep-Fallen: `fn $N(&self)` matcht `pub fn` nicht; zwei `$$$`-Lücken um zwei `bool`-Parameter matchten nicht.
 - Die Guidelines richten sich an Library-Crates, norma ist eine Anwendung: das Pack so beschreiben. Einzige Streuung in `src/`: 57 Treffer bei `pub`-Feldern (Rauschen für Ticket 05).
+
+Die Findings-Datei liegt zusätzlich auf develop unter `research/03-rust-api-guidelines.md`; der Research-Branch ist damit entbehrlich.
