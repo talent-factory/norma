@@ -259,7 +259,7 @@ Two things worth knowing before relying on a bulk import:
 
 ### Ready-made rule packs
 
-`rule-packs/` ships 39 opt-in patterns, curated (not auto-generated) from
+`rule-packs/` ships 79 opt-in patterns, curated (not auto-generated) from
 the [ast-grep catalog](https://ast-grep.github.io/catalog/), real-world
 repos, and other permissively-licensed community rule collections --
 `default_patterns.rs`'s 20 built-in patterns are untouched by this.
@@ -276,6 +276,23 @@ norma import rule-packs/encapsulation --category encapsulation
 See `.scratch/ast-grep-rule-pack-sourcing/map.md` for what's in each
 category, where every rule came from, and why it was adopted (or, for
 everything considered but rejected, why not).
+
+Three further packs are organised **per style guide** instead of per
+category, so findings trace back to a named guide (40 rules in total, only
+what rustfmt and the default Clippy/rustc lints don't already catch):
+
+```bash
+norma import rule-packs/google-rust-style --category google-rust-style    # 20 rules, CC BY 3.0
+norma import rule-packs/rust-style-guide --category rust-style-guide      # 10 rules
+norma import rule-packs/rust-api-guidelines --category rust-api-guidelines # 10 rules
+```
+
+`rust-api-guidelines` targets library crates, as do the
+`*-non-exhaustive-pub-*` rules in `google-rust-style`; on an application
+crate they are mostly noise (severity `hint`). Integration tests under
+`tests/` are not recognizable from file content, so exclude that path (e.g.
+pre-commit `exclude:`) for `google-prefer-expect-over-unwrap-rust`. See
+`.scratch/rust-style-guide-rule-packs/map.md` for the decisions behind them.
 
 ## 🔧 Development
 

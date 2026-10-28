@@ -52,8 +52,7 @@ gültiges Ergebnis.
 
 ## Not yet specified
 
-- Doku-Nachzug: README-Abschnitt "Ready-made rule packs", ggf. CHANGELOG/
-  DEVELOPMENT.md. Wird scharf, sobald feststeht, welche Packs entstehen.
+_(nichts mehr; Doku-Nachzug erledigt, README "Ready-made rule packs" aktualisiert. CHANGELOG entsteht via git-cliff.)_
 
 ## Out of scope
 
@@ -64,4 +63,4 @@ gültiges Ergebnis.
 
 ## Status
 
-Gechartert 2026-10-28. **Alle 5 Tickets resolved, Frontier leer, Destination erreicht** (2026-10-28): drei Packs mit 40 Regeln unter `rule-packs/`. Offen nur der Doku-Nachzug (siehe Not yet specified) und die Nacharbeit an `google-prefer-expect-over-unwrap-rust` (Ticket 05).
+Gechartert 2026-10-28. **Alle 5 Tickets resolved, Frontier leer, Destination erreicht** (2026-10-28): drei Packs mit 40 Regeln unter `rule-packs/`. README-Nachzug erledigt. Die `tests/`-Lücke von `google-prefer-expect-over-unwrap-rust` ist in der Regel-`note` und der README dokumentiert, die Regel selbst blieb unverändert.
