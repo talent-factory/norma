@@ -12,7 +12,14 @@ overwritten on the next merge.
 - Add Google, official and API-guideline Rust style packs (40 rules) ([0e5b0a7](https://github.com/talent-factory/norma/commit/0e5b0a763ccb44b7019ac0870f30ef6ff56919f2))
 
 
+### 🐛 Bug Fixes
+
+- Match the variant, not the whole enum, in rust-no-string-error-variant ([9de1947](https://github.com/talent-factory/norma/commit/9de1947d87300f24ec7b9cbc17d05d734675658c))
+
+
 ### 📚 Documentation
+
+- Regenerate CHANGELOG.md via git-cliff ([fee3b2d](https://github.com/talent-factory/norma/commit/fee3b2d7400633ce86a5818e89d206cc212bc881))
 
 - Add third-party benchmark to dogfood ticket ([1659317](https://github.com/talent-factory/norma/commit/165931747296cb1747a9ec0bb660a0a378fb5ffa))
 
