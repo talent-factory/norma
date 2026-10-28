@@ -47,6 +47,7 @@ gültiges Ergebnis.
 - [Google Rust Style Guide](issues/01-google-rust-style-guide.md) — 89 Kandidaten: 20 adopt, 6 defer, 57 reject, 6 Verweise. Lizenz CC BY 3.0 (Quellenhinweis nötig). Guide widerspricht teils Clippy-Default-Lints.
 - [Rust API Guidelines](issues/03-rust-api-guidelines.md) — 54 Guidelines: 7 adopt, 7 defer, 40 reject (nach Haupteintrag). MIT/Apache-2.0. Sauberste Kandidaten sind die, für die es keinen Lint gibt (`TryInto`, `description()`, Drop-Panic, Struct-Bounds, Deref).
 - [Offizieller Rust Style Guide](issues/02-official-rust-style-guide.md) — 53 Zeilen: 10 adopt, 5 defer, 38 reject (rustfmt deckt fast alles). MIT/Apache-2.0. Echte Lücken: Item-Ordnung, `macro_rules!`-Namen, Doc-Comment-Stil. Grenze um rustc-Lints erweitert.
+- [Overlap-Konsolidierung und Packs](issues/04-overlap-consolidation-and-packs.md) — 40 Regeln in drei Packs gebaut: `rule-packs/google-rust-style/` (20), `rule-packs/rust-style-guide/` (10), `rule-packs/rust-api-guidelines/` (10). Import je Pack 0 skipped, keine ID-Kollision. Linter-Grenze: nur Default-an-Lints zählen als Abdeckung. C-STRUCT-PRIVATE nur als G-75 gebaut (Overlap).
 
 ## Not yet specified
 
@@ -62,4 +63,4 @@ gültiges Ergebnis.
 
 ## Status
 
-Gechartert 2026-10-28. Tickets 01–03 resolved. Frontier: Ticket 04 (Overlap-Konsolidierung und Packs).
+Gechartert 2026-10-28. Tickets 01–04 resolved. Frontier: Ticket 05 (Dogfood-Plausibilitätscheck).
