@@ -14,6 +14,10 @@ overwritten on the next merge.
 
 ### 📚 Documentation
 
+- Resolve dogfood check, close rust-style-guide-rule-packs map ([16a63a9](https://github.com/talent-factory/norma/commit/16a63a91a9ef5320910db3de8da52c0bc246a060))
+
+- Regenerate CHANGELOG.md via git-cliff ([7f2ad6a](https://github.com/talent-factory/norma/commit/7f2ad6a721bfc7bdd471b51a5176e89979e1c0a1))
+
 - Regenerate CHANGELOG.md via git-cliff ([d321e1a](https://github.com/talent-factory/norma/commit/d321e1aa92f33adcae25ec1c6dfbd43bce5b705e))
 
 - Chart rust-style-guide-rule-packs wayfinder map, resolve research tickets 01-03 ([204c1da](https://github.com/talent-factory/norma/commit/204c1daad421271c5f457ddae6d59825b4169060))
