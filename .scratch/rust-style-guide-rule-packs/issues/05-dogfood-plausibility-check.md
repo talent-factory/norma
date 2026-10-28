@@ -31,3 +31,18 @@ Lauf: alle 40 neuen Regeln (frische DB, nur die drei Packs) gegen `git ls-files 
 - Die drei im Ticket 04 genannten Rauschverdächtigen: `style-imports-before-mod-declarations-rust` und `style-comment-space-after-slashes-rust` haben in `src/` null Treffer (kein Rauschen hier, auf fremdem Code weiter ungetestet); `style-use-before-other-items-rust` hat einen echten Treffer.
 - Die Zahl 57 aus der API-Guidelines-Recherche (`pub`-Felder) taucht nicht mehr auf: C-STRUCT-PRIVATE ist in G-75 aufgegangen.
 - **Empfohlene Nacharbeit (nicht in dieser Map ausgeführt):** `tests/` in `google-prefer-expect-over-unwrap-rust` ausnehmen oder in der `note` dokumentieren; im Doku-Nachzug (README) den Library-Crate-Hinweis zu den `non_exhaustive`-Regeln nennen.
+
+## Nachtrag 2026-10-28: Lauf auf fremdem Code
+
+631 Dateien / ca. 181k Zeilen aus serde, clap, tokio, anyhow, regex, itertools, rand und sqlx-core (lokale Cargo-Registry), alle 40 Regeln plus Defaults: 36 Regeln trafen. Die lautesten:
+
+| Regel | Treffer | Einschätzung |
+|---|---|---|
+| `google-unsafe-needs-safety-comment-rust` | 718 (tokio 645, anyhow 67) | Mindestens ein grosser Teil ist Schreibweise: die Regex akzeptiert nur `// SAFETY:`, tokio schreibt 188x `// Safety:` und 66x `// safety:`. Heuristisch tragen 204 der 718 Treffer ein "safety"-Wort in den 4 Zeilen darüber. Der Guide verlangt `SAFETY:`, die Regel folgt ihm wörtlich. |
+| `google-lifetime-name-descriptive-rust` | 499 | erwartetes Hint-Rauschen (`'a`) |
+| `style-imports-before-mod-declarations-rust` | 333 | zu laut: trifft das gängige Muster "erst `mod`, dann `use`" (serde `lib.rs`). Severity `info`. |
+| `google-prefer-expect-over-unwrap-rust` | 164 | teils `tests/`-Lücke, teils echt |
+| `api-c-feature-placeholder-words-rust` | 117 | trifft auch `use_std` (Unterstrich); inhaltlich vertretbar |
+| `style-use-before-other-items-rust` | 97 | nahe an `imports-before-mod`, gleiche Prüfung |
+
+Offene Entscheidung: `SAFETY:` case-insensitive akzeptieren (weniger Rauschen, weicht vom Wortlaut des Guides ab) oder wörtlich lassen. Nicht entschieden, Regel unverändert.
